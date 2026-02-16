@@ -1,0 +1,26 @@
+[workspace]
+members = [
+  "core",
+  "proxy",
+  "shared",
+  "shell",
+]
+resolver = "2"
+
+[workspace.dependencies]
+gloo-console = "0.3.0"
+gloo-timers = {version = "0.3.0", features = ["futures"] }
+gloo-worker = "0.5.0"
+js-sys = "0.3.85"
+leptos = { version = "0.8.15", features = ["csr"] }
+matrix-sdk = { version = "0.16", default-features = false, features = ["js", "indexeddb", "e2e-encryption", "rustls-tls"] }
+ruma = { version = "0.14.1", features = ["full"] }
+serde = { version = "1.0.228", features = ["derive"] }
+wasm-bindgen = "0.2.108"
+wasm-bindgen-futures = "0.4.58"
+web-sys = { version = "0.3.85", features = ["ServiceWorkerGlobalScope", "FetchEvent", "Cache", "CacheStorage", "Request", "Response"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
