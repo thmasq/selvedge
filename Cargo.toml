@@ -7,6 +7,16 @@ members = [
 ]
 resolver = "2"
 
+[workspace.metadata]
+project_name = "selvedge"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+repository = "https://github.com/thmasq/selvedge"
+description = "Web-based Matrix client with multi-threaded WASM architecture"
+
 [workspace.dependencies]
 gloo-console = "0.3.0"
 gloo-timers = {version = "0.3.0", features = ["futures"] }
@@ -22,5 +32,5 @@ web-sys = { version = "0.3.85", features = ["ServiceWorkerGlobalScope", "FetchEv
 
 [profile.release]
 opt-level = "z"
-lto = true
+lto = "fat"
 codegen-units = 1
