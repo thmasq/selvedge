@@ -10,13 +10,14 @@ description.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-selvedge-shared = { path = "../shared" }
-matrix-sdk = { workspace = true }
-wasm-bindgen = { workspace = true }
-wasm-bindgen-futures = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
+getrandom = { workspace = true }
 gloo-console = { workspace = true }
 gloo-timers = { workspace = true }
 gloo-worker = { workspace = true }
-ruma = { workspace = true }
 js-sys = { workspace = true }
+matrix-sdk = { workspace = true }
+ruma = { workspace = true }
+selvedge-shared = { path = "../shared" }
+serde = { workspace = true, features = ["derive"] }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
