@@ -30,6 +30,7 @@ pub enum ToActor {
         username: String,
         password: String,
     },
+    RestoreSession,
     StartSync,
     SendMessage {
         room_id: OwnedRoomId,
@@ -148,6 +149,7 @@ impl MatrixActor {
                 username,
                 password,
             } => self.login(homeserver_url, username, password).await,
+            ToActor::RestoreSession => self.restore_session().await,
             ToActor::StartSync => {
                 self.start_sync().await;
                 vec![]
@@ -190,7 +192,9 @@ impl MatrixActor {
     }
 
     async fn login(&mut self, url: String, user: String, pass: String) -> Vec<ToShell> {
-        let client_builder = Client::builder().homeserver_url(&url);
+        let client_builder = Client::builder()
+            .homeserver_url(&url)
+            .indexeddb_store("selvedge-store", None);
 
         match client_builder.build().await {
             Ok(client) => match client.matrix_auth().login_username(&user, &pass).await {
@@ -200,6 +204,22 @@ impl MatrixActor {
                 }
                 Err(e) => vec![ToShell::LoginFailure(e.to_string())],
             },
+            Err(e) => vec![ToShell::LoginFailure(e.to_string())],
+        }
+    }
+
+    async fn restore_session(&mut self) -> Vec<ToShell> {
+        let client_builder = Client::builder().indexeddb_store("selvedge-store", None);
+
+        match client_builder.build().await {
+            Ok(client) => {
+                if client.session_meta().is_some() {
+                    self.client = Some(client);
+                    vec![ToShell::LoginSuccess]
+                } else {
+                    vec![ToShell::LoginFailure("No saved session found".to_string())]
+                }
+            }
             Err(e) => vec![ToShell::LoginFailure(e.to_string())],
         }
     }
