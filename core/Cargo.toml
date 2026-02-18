@@ -14,6 +14,7 @@ getrandom = { workspace = true }
 gloo-console = { workspace = true }
 gloo-timers = { workspace = true }
 gloo-worker = { workspace = true }
+indexmap = { workspace = true }
 js-sys = { workspace = true }
 matrix-sdk = { workspace = true }
 ruma = { workspace = true }

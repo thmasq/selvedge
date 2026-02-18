@@ -3617,6 +3617,7 @@ dependencies = [
  "gloo-console",
  "gloo-timers",
  "gloo-worker",
+ "indexmap",
  "js-sys",
  "matrix-sdk",
  "ruma",
