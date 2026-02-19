@@ -33,6 +33,61 @@ pub struct CallParticipant {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TimelineDiff {
+    Append { entries: Vec<TimelineItem> },
+    Clear,
+    PushFront { entry: TimelineItem },
+    PushBack { entry: TimelineItem },
+    PopFront,
+    PopBack,
+    Insert { index: usize, entry: TimelineItem },
+    Set { index: usize, entry: TimelineItem },
+    Remove { index: usize },
+    Truncate { length: usize },
+    Reset { entries: Vec<TimelineItem> },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum RoomListEntryView {
+    Empty,
+    Invalidated(OwnedRoomId),
+    Filled(RoomSummary),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum RoomListEntryDiff {
+    Append {
+        entries: Vec<RoomListEntryView>,
+    },
+    Clear,
+    PushFront {
+        entry: RoomListEntryView,
+    },
+    PushBack {
+        entry: RoomListEntryView,
+    },
+    PopFront,
+    PopBack,
+    Insert {
+        index: usize,
+        entry: RoomListEntryView,
+    },
+    Set {
+        index: usize,
+        entry: RoomListEntryView,
+    },
+    Remove {
+        index: usize,
+    },
+    Truncate {
+        length: usize,
+    },
+    Reset {
+        entries: Vec<RoomListEntryView>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoomSummary {
     pub room_id: OwnedRoomId,
     pub name: Option<String>,

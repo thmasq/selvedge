@@ -10,6 +10,8 @@ description.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+eyeball-im = { workspace = true }
+futures = { workspace = true }
 getrandom = { workspace = true }
 gloo-console = { workspace = true }
 gloo-timers = { workspace = true }
@@ -17,10 +19,10 @@ gloo-worker = { workspace = true }
 indexmap = { workspace = true }
 js-sys = { workspace = true }
 matrix-sdk = { workspace = true }
+matrix-sdk-ui = { workspace = true }
+mime = { workspace = true }
 ruma = { workspace = true }
 selvedge-shared = { path = "../shared" }
 serde = { workspace = true, features = ["derive"] }
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
-futures = { workspace = true }
-mime = { workspace = true }

@@ -1,26 +1,31 @@
 use crate::model::{
-    DeliveryStatus, EventItem, MemberProfile, RoomDetails, RoomSummary, TimelineContent,
-    TimelineItem,
+    DeliveryStatus, EventItem, RoomDetails, RoomListEntryDiff, RoomListEntryView, RoomSummary,
+    TimelineContent, TimelineDiff, TimelineItem,
 };
+use eyeball_im::VectorDiff;
 use futures::{StreamExt, channel::mpsc};
 use gloo_worker::HandlerId;
 use gloo_worker::{Worker, WorkerScope};
 use matrix_sdk::{
     Client,
     attachment::AttachmentConfig,
-    config::SyncSettings,
     ruma::{
-        OwnedEventId, OwnedRoomId,
-        events::{
-            AnyMessageLikeEventContent, AnySyncTimelineEvent,
-            room::message::RoomMessageEventContent,
-        },
+        OwnedEventId, OwnedRoomId, OwnedTransactionId,
+        events::room::message::RoomMessageEventContent,
     },
 };
+use matrix_sdk_ui::timeline::RoomExt;
+use matrix_sdk_ui::{
+    room_list_service::{RoomListItem, RoomListService, filters::new_filter_all},
+    timeline::{EventSendState, Timeline, VirtualTimelineItem},
+};
+use ruma::MilliSecondsSinceUnixEpoch;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::str::FromStr;
+use std::sync::Arc;
 use wasm_bindgen_futures::spawn_local;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -32,6 +37,12 @@ pub enum ToActor {
     },
     RestoreSession,
     StartSync,
+    OpenRoom {
+        room_id: OwnedRoomId,
+    },
+    CloseRoom {
+        room_id: OwnedRoomId,
+    },
     SendMessage {
         room_id: OwnedRoomId,
         body: String,
@@ -68,14 +79,14 @@ pub enum ToShell {
     LoginSuccess,
     LoginFailure(String),
     SyncError(String),
-    RoomListUpdate(Vec<RoomSummary>),
+    RoomListDiff(Vec<RoomListEntryDiff>),
     RoomDetailsUpdate {
         room_id: OwnedRoomId,
         details: RoomDetails,
     },
-    TimelineEvent {
+    TimelineDiff {
         room_id: OwnedRoomId,
-        item: TimelineItem,
+        diff: Vec<TimelineDiff>,
     },
 }
 
@@ -128,6 +139,7 @@ impl Worker for MatrixWorker {
 struct MatrixActor {
     client: Option<Client>,
     event_sender: mpsc::UnboundedSender<ToShell>,
+    active_timelines: HashMap<OwnedRoomId, Arc<Timeline>>,
 }
 
 impl MatrixActor {
@@ -135,6 +147,7 @@ impl MatrixActor {
         Self {
             client: None,
             event_sender,
+            active_timelines: HashMap::new(),
         }
     }
 
@@ -154,12 +167,20 @@ impl MatrixActor {
                 self.start_sync().await;
                 vec![]
             }
+            ToActor::OpenRoom { room_id } => {
+                self.open_room(room_id).await;
+                vec![]
+            }
+            ToActor::CloseRoom { room_id } => {
+                self.active_timelines.remove(&room_id);
+                vec![]
+            }
             ToActor::SendMessage {
                 room_id,
                 body,
-                reply_to,
+                reply_to: _,
             } => {
-                self.send_message(room_id, body, reply_to).await;
+                self.send_message(room_id, body).await;
                 vec![]
             }
             ToActor::SendMedia {
@@ -182,12 +203,41 @@ impl MatrixActor {
             ToActor::JoinRoom { room_id } => {
                 if let Some(client) = &self.client {
                     let _ = client.join_room_by_id(&room_id).await;
-                    // Trigger a refresh of room list
-                    // self.refresh_room_list().await;
                 }
                 vec![]
             }
-            _ => vec![],
+            ToActor::LeaveRoom { room_id } => {
+                if let Some(client) = &self.client {
+                    if let Some(room) = client.get_room(&room_id) {
+                        let _ = room.leave().await;
+                        self.active_timelines.remove(&room_id);
+                    }
+                }
+                vec![]
+            }
+            ToActor::CreateRoom {
+                name,
+                topic,
+                is_encrypted: _,
+            } => {
+                if let Some(client) = &self.client {
+                    use matrix_sdk::ruma::api::client::room::create_room::v3::Request as CreateRoomRequest;
+
+                    let mut request = CreateRoomRequest::new();
+                    request.name = Some(name);
+                    request.topic = topic;
+
+                    // TODO: Add an m.room.encryption state event to `request.initial_state`
+                    let _ = client.create_room(request).await;
+                }
+                vec![]
+            }
+            ToActor::LoadHistory { room_id } => {
+                if let Some(timeline) = self.active_timelines.get(&room_id) {
+                    let _ = timeline.paginate_backwards(20).await;
+                }
+                vec![]
+            }
         }
     }
 
@@ -230,39 +280,100 @@ impl MatrixActor {
             let sender = self.event_sender.clone();
 
             spawn_local(async move {
-                let settings = SyncSettings::default();
+                match RoomListService::new(client.clone()).await {
+                    Ok(room_list_service) => {
+                        let room_list_service = Rc::new(room_list_service);
 
-                client.add_event_handler({
-                    let sender = sender.clone();
-                    move |event: AnySyncTimelineEvent, room: matrix_sdk::Room| {
-                        let sender = sender.clone();
-                        async move {
-                            let timeline_item = Self::process_incoming_event(event, &room).await;
+                        {
+                            let svc = room_list_service.clone();
+                            spawn_local(async move {
+                                let sync_stream = svc.sync();
+                                futures::pin_mut!(sync_stream);
+                                while let Some(_) = sync_stream.next().await {}
+                            });
+                        }
 
-                            if let Some(item) = timeline_item {
-                                let _ = sender.unbounded_send(ToShell::TimelineEvent {
-                                    room_id: room.room_id().to_owned(),
-                                    item,
-                                });
-                            }
+                        {
+                            let svc = room_list_service.clone();
+                            let sender = sender.clone();
+
+                            spawn_local(async move {
+                                if let Ok(all_rooms) = svc.all_rooms().await {
+                                    let (entries_stream, controller) =
+                                        all_rooms.entries_with_dynamic_adapters(50);
+
+                                    controller.set_filter(Box::new(new_filter_all(vec![])));
+
+                                    futures::pin_mut!(entries_stream);
+
+                                    while let Some(diffs) = entries_stream.next().await {
+                                        let mapped = futures::future::join_all(
+                                            diffs.into_iter().map(map_room_list_diff),
+                                        )
+                                        .await;
+
+                                        let _ =
+                                            sender.unbounded_send(ToShell::RoomListDiff(mapped));
+                                    }
+                                }
+                            });
                         }
                     }
-                });
-
-                if let Err(e) = client.sync(settings).await {
-                    let _ = sender.unbounded_send(ToShell::SyncError(e.to_string()));
+                    Err(e) => {
+                        let _ = sender.unbounded_send(ToShell::SyncError(e.to_string()));
+                    }
                 }
             });
         }
     }
 
-    async fn send_message(
-        &self,
-        room_id: OwnedRoomId,
-        body: String,
-        _reply_to: Option<OwnedEventId>,
-    ) {
+    async fn open_room(&mut self, room_id: OwnedRoomId) {
         if let Some(client) = &self.client {
+            if let Some(room) = client.get_room(&room_id) {
+                if !self.active_timelines.contains_key(&room_id) {
+                    if let Ok(timeline) = room.timeline_builder().build().await {
+                        let (items, mut stream) = timeline.subscribe().await;
+
+                        let initial_views: Vec<TimelineItem> = items
+                            .into_iter()
+                            .map(|i| map_timeline_item_safe(&i))
+                            .collect();
+
+                        self.send_event(ToShell::TimelineDiff {
+                            room_id: room_id.clone(),
+                            diff: vec![TimelineDiff::Reset {
+                                entries: initial_views,
+                            }],
+                        });
+
+                        self.active_timelines
+                            .insert(room_id.clone(), Arc::new(timeline));
+
+                        let sender = self.event_sender.clone();
+                        let stream_room_id = room_id.clone();
+
+                        spawn_local(async move {
+                            while let Some(diffs) = stream.next().await {
+                                let mapped_diffs: Vec<TimelineDiff> =
+                                    diffs.into_iter().map(map_timeline_diff).collect();
+
+                                let _ = sender.unbounded_send(ToShell::TimelineDiff {
+                                    room_id: stream_room_id.clone(),
+                                    diff: mapped_diffs,
+                                });
+                            }
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    async fn send_message(&self, room_id: OwnedRoomId, body: String) {
+        if let Some(timeline) = self.active_timelines.get(&room_id) {
+            let content = RoomMessageEventContent::text_plain(body);
+            let _ = timeline.send(content.into()).await;
+        } else if let Some(client) = &self.client {
             if let Some(room) = client.get_room(&room_id) {
                 let content = RoomMessageEventContent::text_plain(body);
                 let _ = room.send(content).await;
@@ -286,50 +397,168 @@ impl MatrixActor {
             }
         }
     }
+}
 
-    async fn process_incoming_event(
-        event: AnySyncTimelineEvent,
-        room: &matrix_sdk::Room,
-    ) -> Option<TimelineItem> {
-        match event {
-            AnySyncTimelineEvent::MessageLike(msg) => {
-                let event_id = msg.event_id().to_owned();
-                let sender = msg.sender().to_owned();
-                let timestamp = msg.origin_server_ts();
+fn map_timeline_item_safe(item: &matrix_sdk_ui::timeline::TimelineItem) -> TimelineItem {
+    match item.kind() {
+        matrix_sdk_ui::timeline::TimelineItemKind::Event(event) => {
+            let content = if let Some(msg) = event.content().as_message() {
+                let ruma_content = RoomMessageEventContent::new(msg.msgtype().clone());
+                ruma_content.into()
+            } else {
+                // Ignore State Events / unsupported for now
+                TimelineContent::Unsupported
+            };
 
-                let member_profile = match room.get_member(&sender).await {
-                    Ok(Some(member)) => Some(MemberProfile {
-                        user_id: sender.clone(),
-                        display_name: member.display_name().map(ToOwned::to_owned),
-                        avatar_url: member.avatar_url().map(ToOwned::to_owned),
-                        membership: member.membership().clone(),
-                    }),
-                    _ => None,
-                };
-
-                if let Some(content_enum) = msg.original_content() {
-                    let content: TimelineContent = match content_enum {
-                        AnyMessageLikeEventContent::RoomMessage(c) => c.into(),
-                        // TODO:  handle stickers later
-                        _ => TimelineContent::Unsupported,
-                    };
-
-                    return Some(TimelineItem::Event(EventItem {
-                        event_id,
-                        sender,
-                        sender_profile: member_profile,
-                        timestamp,
-                        content,
-                        reactions: Default::default(),
-                        delivery_status: DeliveryStatus::Synced,
-                        in_reply_to: None,
-                        is_edited: false,
-                    }));
+            let delivery_status = if let Some(local_echo) = event.send_state() {
+                match local_echo {
+                    EventSendState::NotSentYet { .. } => {
+                        DeliveryStatus::Sending(OwnedTransactionId::from("dummy"))
+                    }
+                    EventSendState::Sent { .. } => DeliveryStatus::Sent,
+                    EventSendState::SendingFailed { .. } => {
+                        DeliveryStatus::Error("Failed to send".to_string())
+                    }
                 }
-            }
-            // TODO: handle state events (RoomName, Topic, etc)
-            _ => {}
+            } else {
+                DeliveryStatus::Synced
+            };
+
+            let event_id = event
+                .event_id()
+                .map(|id| id.to_owned())
+                .unwrap_or_else(|| OwnedEventId::from_str("$dummy").unwrap());
+
+            let is_edited = event
+                .content()
+                .as_message()
+                .map(|m| m.is_edited())
+                .unwrap_or(false);
+
+            TimelineItem::Event(EventItem {
+                event_id,
+                sender: event.sender().to_owned(),
+                sender_profile: None,
+                timestamp: MilliSecondsSinceUnixEpoch(event.timestamp().0.into()),
+                content,
+                reactions: Default::default(),
+                read_receipts: Default::default(),
+                delivery_status,
+                in_reply_to: None,
+                reply_details: None,
+                is_edited,
+                latest_edit: None,
+                thread_root_id: None,
+                is_highlight: event.is_highlighted(),
+                should_group: false,
+                encryption_status: crate::model::EncryptionStatus::Unencrypted,
+            })
         }
-        None
+        matrix_sdk_ui::timeline::TimelineItemKind::Virtual(virt) => match virt {
+            VirtualTimelineItem::DateDivider(ts) => {
+                TimelineItem::Virtual(crate::model::VirtualItem::DayDivider {
+                    ts: MilliSecondsSinceUnixEpoch(ts.0.into()),
+                })
+            }
+            _ => TimelineItem::Virtual(crate::model::VirtualItem::LoadingIndicator),
+        },
+    }
+}
+
+fn map_timeline_diff(diff: VectorDiff<Arc<matrix_sdk_ui::timeline::TimelineItem>>) -> TimelineDiff {
+    match diff {
+        VectorDiff::Append { values } => TimelineDiff::Append {
+            entries: values
+                .into_iter()
+                .map(|v| map_timeline_item_safe(&v))
+                .collect(),
+        },
+        VectorDiff::Clear => TimelineDiff::Clear,
+        VectorDiff::PushFront { value } => TimelineDiff::PushFront {
+            entry: map_timeline_item_safe(&value),
+        },
+        VectorDiff::PushBack { value } => TimelineDiff::PushBack {
+            entry: map_timeline_item_safe(&value),
+        },
+        VectorDiff::PopFront => TimelineDiff::PopFront,
+        VectorDiff::PopBack => TimelineDiff::PopBack,
+        VectorDiff::Insert { index, value } => TimelineDiff::Insert {
+            index,
+            entry: map_timeline_item_safe(&value),
+        },
+        VectorDiff::Set { index, value } => TimelineDiff::Set {
+            index,
+            entry: map_timeline_item_safe(&value),
+        },
+        VectorDiff::Remove { index } => TimelineDiff::Remove { index },
+        VectorDiff::Truncate { length } => TimelineDiff::Truncate { length },
+        VectorDiff::Reset { values } => TimelineDiff::Reset {
+            entries: values
+                .into_iter()
+                .map(|v| map_timeline_item_safe(&v))
+                .collect(),
+        },
+    }
+}
+
+async fn room_list_item_to_view(item: RoomListItem) -> RoomListEntryView {
+    let unread = item.unread_notification_counts();
+
+    let last_activity = item
+        .latest_event()
+        .and_then(|e| e.event().timestamp())
+        .unwrap_or_else(|| MilliSecondsSinceUnixEpoch(0u32.into()));
+
+    let summary = RoomSummary {
+        room_id: item.room_id().to_owned(),
+        name: item.name(),
+        avatar_url: item.avatar_url().map(|a| a.to_owned()),
+        notification_count: unread.notification_count,
+        highlight_count: unread.highlight_count,
+        unread_count: 0,
+        is_direct: item.is_direct().await.unwrap_or(false),
+        last_message_preview: None,
+        last_activity,
+        has_active_call: false,
+        active_call_participant_count: 0,
+        tags: HashSet::new(),
+    };
+
+    RoomListEntryView::Filled(summary)
+}
+
+async fn map_room_list_diff(diff: VectorDiff<RoomListItem>) -> RoomListEntryDiff {
+    match diff {
+        VectorDiff::Append { values } => RoomListEntryDiff::Append {
+            entries: futures::future::join_all(
+                values.into_iter().map(|v| room_list_item_to_view(v)),
+            )
+            .await,
+        },
+        VectorDiff::Clear => RoomListEntryDiff::Clear,
+        VectorDiff::PushFront { value } => RoomListEntryDiff::PushFront {
+            entry: room_list_item_to_view(value).await,
+        },
+        VectorDiff::PushBack { value } => RoomListEntryDiff::PushBack {
+            entry: room_list_item_to_view(value).await,
+        },
+        VectorDiff::PopFront => RoomListEntryDiff::PopFront,
+        VectorDiff::PopBack => RoomListEntryDiff::PopBack,
+        VectorDiff::Insert { index, value } => RoomListEntryDiff::Insert {
+            index,
+            entry: room_list_item_to_view(value).await,
+        },
+        VectorDiff::Set { index, value } => RoomListEntryDiff::Set {
+            index,
+            entry: room_list_item_to_view(value).await,
+        },
+        VectorDiff::Remove { index } => RoomListEntryDiff::Remove { index },
+        VectorDiff::Truncate { length } => RoomListEntryDiff::Truncate { length },
+        VectorDiff::Reset { values } => RoomListEntryDiff::Reset {
+            entries: futures::future::join_all(
+                values.into_iter().map(|v| room_list_item_to_view(v)),
+            )
+            .await,
+        },
     }
 }
