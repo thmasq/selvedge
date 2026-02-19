@@ -78,7 +78,7 @@ pub enum WorkerEvent {
     StickerPacksReady(Vec<StickerPackView>),
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RoomView {
     pub id: String,
     pub name: String,
@@ -91,7 +91,7 @@ pub struct RoomView {
     pub members_count: u64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MessageView {
     pub id: String,
     pub sender: String,
@@ -112,14 +112,14 @@ pub struct MessageView {
     pub read_receipts: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReactionView {
     pub key: String,
     pub count: usize,
     pub includes_me: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MessageStatus {
     Synced,
     Sending,
@@ -127,14 +127,14 @@ pub enum MessageStatus {
     Local,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StickerPackView {
     pub name: String,
     pub avatar_url: Option<String>,
     pub stickers: Vec<StickerView>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StickerView {
     pub shortcode: String,
     pub url: String,
