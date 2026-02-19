@@ -2,9 +2,16 @@ use indexmap::IndexMap;
 use matrix_sdk::ruma::{
     MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedMxcUri, OwnedRoomId, OwnedTransactionId,
     OwnedUserId,
-    events::room::{ImageInfo, member::MembershipState, message::RoomMessageEventContent},
+    events::{
+        key::verification::VerificationMethod,
+        room::{
+            MediaSource as RumaMediaSource,
+            member::MembershipState,
+            message::{MessageType, RoomMessageEventContent},
+        },
+    },
 };
-use ruma::events::room::message::AudioInfo;
+use ruma::events::room::EncryptedFile;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -36,6 +43,10 @@ pub struct RoomSummary {
     pub last_activity: MilliSecondsSinceUnixEpoch,
     pub has_active_call: bool,
     pub active_call_participant_count: u64,
+    pub unread_count: u64,
+    pub highlight_count: u64,
+
+    pub tags: HashSet<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,14 +59,11 @@ pub struct RoomDetails {
     pub timeline: VecDeque<TimelineItem>,
     pub typing_users: HashSet<OwnedUserId>,
     pub active_call: Option<ActiveCallState>,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MemberProfile {
-    pub user_id: OwnedUserId,
-    pub display_name: Option<String>,
-    pub avatar_url: Option<OwnedMxcUri>,
-    pub membership: MembershipState,
+    pub permissions: RoomPermissions,
+    pub prev_batch: Option<String>,
+    pub next_batch: Option<String>,
+    pub fully_read_marker: Option<OwnedEventId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,16 +74,195 @@ pub enum TimelineItem {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplyDetails {
+    pub sender: OwnedUserId,
+    pub sender_display_name: Option<String>,
+    pub content: Box<TimelineContent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventItem {
     pub event_id: OwnedEventId,
     pub sender: OwnedUserId,
     pub sender_profile: Option<MemberProfile>,
     pub timestamp: MilliSecondsSinceUnixEpoch,
+
     pub content: TimelineContent,
-    pub reactions: IndexMap<String, u64>,
+
+    pub reactions: IndexMap<String, ReactionDetails>,
+    pub read_receipts: Vec<OwnedUserId>,
     pub delivery_status: DeliveryStatus,
+
     pub in_reply_to: Option<OwnedEventId>,
+    pub reply_details: Option<ReplyDetails>,
     pub is_edited: bool,
+    pub latest_edit: Option<Box<TimelineContent>>,
+    pub thread_root_id: Option<OwnedEventId>,
+
+    pub is_highlight: bool,
+    pub should_group: bool,
+    pub encryption_status: EncryptionStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum TimelineContent {
+    Message(MessageContent),
+    State(StateContent),
+    Poll(PollState),
+    Call(CallContent),
+    Verification(VerificationRequest),
+    Redaction { reason: Option<String> },
+    Unsupported,
+    Redacted,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "msgtype", content = "data")]
+pub enum MessageContent {
+    Text {
+        body: String,
+        formatted: Option<String>,
+        previews: Vec<LinkPreview>,
+    },
+    Image {
+        body: String,
+        source: MediaSource,
+        info: Option<ImageInfo>,
+    },
+    Video {
+        body: String,
+        source: MediaSource,
+        info: Option<VideoInfo>,
+    },
+    Audio {
+        body: String,
+        source: MediaSource,
+        info: Option<AudioInfoWrapper>,
+    },
+    File {
+        body: String,
+        filename: String,
+        source: MediaSource,
+    },
+    Sticker {
+        body: String,
+        source: MediaSource,
+        info: Option<ImageInfo>,
+    },
+    Notice {
+        body: String,
+        formatted: Option<String>,
+    },
+    Emote {
+        body: String,
+        formatted: Option<String>,
+    },
+    Location {
+        body: String,
+        geo_uri: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum StateContent {
+    Member {
+        user_id: OwnedUserId,
+        membership: MembershipState,
+        prev_membership: Option<MembershipState>,
+        reason: Option<String>,
+    },
+    RoomName {
+        name: String,
+    },
+    RoomTopic {
+        topic: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallContent {
+    pub call_id: String,
+    pub call_type: CallType,
+    pub duration: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MediaSource {
+    Plain(OwnedMxcUri),
+    Encrypted(Box<EncryptedFile>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageInfo {
+    pub height: Option<u64>,
+    pub width: Option<u64>,
+    pub mimetype: Option<String>,
+    pub size: Option<u64>,
+    pub thumbnail_source: Option<MediaSource>,
+    pub thumbnail_info: Option<Box<ThumbnailInfo>>,
+    pub blurhash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VideoInfo {
+    pub duration: Option<u64>,
+    pub height: Option<u64>,
+    pub width: Option<u64>,
+    pub mimetype: Option<String>,
+    pub size: Option<u64>,
+    pub thumbnail_source: Option<MediaSource>,
+    pub blurhash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThumbnailInfo {
+    pub height: Option<u64>,
+    pub width: Option<u64>,
+    pub mimetype: Option<String>,
+    pub size: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LinkPreview {
+    pub url: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub image: Option<MediaSource>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemberProfile {
+    pub user_id: OwnedUserId,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<OwnedMxcUri>,
+    pub membership: MembershipState,
+    pub presence: PresenceState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum PresenceState {
+    Online,
+    Offline,
+    Unavailable,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RoomPermissions {
+    pub can_send_message: bool,
+    pub can_send_media: bool,
+    pub can_redact: bool,
+    pub can_ban: bool,
+    pub can_kick: bool,
+    pub can_invite: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReactionDetails {
+    pub count: u64,
+    pub me_reacted: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -84,6 +271,56 @@ pub enum DeliveryStatus {
     Sent,
     Error(String),
     Synced,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum EncryptionStatus {
+    Unencrypted,
+    Verified,
+    Unverified,
+    Undecryptable(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioInfoWrapper {
+    pub duration: Option<u64>,
+    pub mimetype: Option<String>,
+    pub size: Option<u64>,
+    pub waveform: Option<Vec<u16>>,
+    pub is_voice_message: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PollState {
+    pub question: String,
+    pub answers: Vec<PollAnswer>,
+    pub is_closed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PollAnswer {
+    pub id: String,
+    pub text: String,
+    pub count: u64,
+    pub is_selected: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerificationRequest {
+    pub body: String,
+    pub from_device: Option<String>,
+    pub state: VerificationState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum VerificationState {
+    Requested { methods: Vec<VerificationMethod> },
+    Ready,
+    Started { method: VerificationMethod },
+    SasEmoji { emoji: Vec<(String, String)> },
+    SasDecimal { decimals: (u16, u16, u16) },
+    Cancelled,
+    Done,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,85 +337,93 @@ pub enum CallType {
     Video,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "msgtype", content = "body")]
-pub enum TimelineContent {
-    Text {
-        body: String,
-        formatted: Option<String>,
-    },
-    Image {
-        body: String,
-        url: OwnedMxcUri,
-        info: Option<ImageInfo>,
-    },
-    Video {
-        body: String,
-        url: OwnedMxcUri,
-    },
-    Audio {
-        body: String,
-        url: OwnedMxcUri,
-        info: Option<AudioInfo>,
-    },
-    File {
-        body: String,
-        filename: String,
-        url: OwnedMxcUri,
-    },
-    Notice {
-        body: String,
-    },
-    Emote {
-        body: String,
-    },
-    Call {
-        call_type: CallType,
-        label: String,
-        duration_ms: Option<u64>,
-    },
-    Unsupported,
-    Redacted,
+fn convert_media_source(source: RumaMediaSource) -> MediaSource {
+    match source {
+        RumaMediaSource::Plain(url) => MediaSource::Plain(url),
+        RumaMediaSource::Encrypted(file) => MediaSource::Encrypted(Box::new(*file)),
+    }
 }
 
-fn get_media_url(source: matrix_sdk::ruma::events::room::MediaSource) -> OwnedMxcUri {
-    use matrix_sdk::ruma::events::room::MediaSource;
-    match source {
-        MediaSource::Plain(url) => url,
-        MediaSource::Encrypted(file) => file.url,
+fn convert_image_info(info: matrix_sdk::ruma::events::room::ImageInfo) -> ImageInfo {
+    ImageInfo {
+        height: info.height.map(|x| x.into()),
+        width: info.width.map(|x| x.into()),
+        mimetype: info.mimetype,
+        size: info.size.map(|x| x.into()),
+        thumbnail_source: info.thumbnail_source.map(convert_media_source),
+        thumbnail_info: info.thumbnail_info.map(|t| {
+            Box::new(ThumbnailInfo {
+                height: t.height.map(|x| x.into()),
+                width: t.width.map(|x| x.into()),
+                mimetype: t.mimetype,
+                size: t.size.map(|x| x.into()),
+            })
+        }),
+        blurhash: info.blurhash,
     }
 }
 
 impl From<RoomMessageEventContent> for TimelineContent {
     fn from(content: RoomMessageEventContent) -> Self {
-        use matrix_sdk::ruma::events::room::message::MessageType;
-
         match content.msgtype {
-            MessageType::Text(t) => TimelineContent::Text {
+            MessageType::Text(t) => TimelineContent::Message(MessageContent::Text {
                 body: t.body,
                 formatted: t.formatted.map(|f| f.body),
-            },
-            MessageType::Image(i) => TimelineContent::Image {
+                previews: Vec::new(),
+            }),
+            MessageType::Image(i) => TimelineContent::Message(MessageContent::Image {
                 body: i.body,
-                url: get_media_url(i.source),
-                info: i.info.map(|b| *b),
-            },
-            MessageType::Video(v) => TimelineContent::Video {
+                source: convert_media_source(i.source),
+                info: i.info.map(|info| convert_image_info(*info)),
+            }),
+            MessageType::Video(v) => TimelineContent::Message(MessageContent::Video {
                 body: v.body,
-                url: get_media_url(v.source),
-            },
-            MessageType::Audio(a) => TimelineContent::Audio {
+                source: convert_media_source(v.source),
+                info: v.info.map(|info| VideoInfo {
+                    duration: info.duration.map(|d| d.as_millis() as u64),
+                    height: info.height.map(|x| x.into()),
+                    width: info.width.map(|x| x.into()),
+                    mimetype: info.mimetype,
+                    size: info.size.map(|x| x.into()),
+                    thumbnail_source: info.thumbnail_source.map(convert_media_source),
+                    blurhash: info.blurhash,
+                }),
+            }),
+            MessageType::Audio(a) => TimelineContent::Message(MessageContent::Audio {
                 body: a.body,
-                url: get_media_url(a.source),
-                info: a.info.map(|b| *b),
-            },
-            MessageType::File(f) => TimelineContent::File {
+                source: convert_media_source(a.source),
+                info: a.info.map(|info| AudioInfoWrapper {
+                    duration: info.duration.map(|d| d.as_millis() as u64),
+                    mimetype: info.mimetype,
+                    size: info.size.map(|s| s.into()),
+                    waveform: None,
+                    is_voice_message: false,
+                }),
+            }),
+            MessageType::File(f) => TimelineContent::Message(MessageContent::File {
                 body: f.body,
                 filename: f.filename.unwrap_or_default(),
-                url: get_media_url(f.source),
-            },
-            MessageType::Notice(n) => TimelineContent::Notice { body: n.body },
-            MessageType::Emote(e) => TimelineContent::Emote { body: e.body },
+                source: convert_media_source(f.source),
+            }),
+            MessageType::Notice(n) => TimelineContent::Message(MessageContent::Notice {
+                body: n.body,
+                formatted: n.formatted.map(|f| f.body),
+            }),
+            MessageType::Emote(e) => TimelineContent::Message(MessageContent::Emote {
+                body: e.body,
+                formatted: e.formatted.map(|f| f.body),
+            }),
+            MessageType::Location(l) => TimelineContent::Message(MessageContent::Location {
+                body: l.body,
+                geo_uri: l.geo_uri,
+            }),
+            MessageType::VerificationRequest(v) => {
+                TimelineContent::Verification(VerificationRequest {
+                    body: v.body,
+                    from_device: Some(v.from_device.to_string()),
+                    state: VerificationState::Requested { methods: v.methods },
+                })
+            }
             _ => TimelineContent::Unsupported,
         }
     }
