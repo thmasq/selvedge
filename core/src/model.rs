@@ -14,6 +14,40 @@ use matrix_sdk::ruma::{
 use ruma::events::room::EncryptedFile;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
+use thiserror::Error;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Error, PartialEq)]
+pub enum ModelError {
+    #[error("Failed to deliver message: {0}")]
+    DeliveryFailed(String),
+
+    #[error("Unable to decrypt message: {0}")]
+    Undecryptable(String),
+
+    #[error("Unsupported event type encountered")]
+    UnsupportedEvent,
+
+    #[error("Media conversion error: {0}")]
+    MediaError(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Error, PartialEq)]
+pub enum ActorError {
+    #[error("Failed to authenticate: {0}")]
+    LoginFailed(String),
+
+    #[error("Failed to start sync service: {0}")]
+    SyncInitializationFailed(String),
+
+    #[error("Room operation failed: {0}")]
+    RoomOperationFailed(String),
+
+    #[error("Pagination failed: {0}")]
+    PaginationFailed(String),
+
+    #[error("Client is not initialized")]
+    ClientNotInitialized,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActiveCallState {
@@ -142,7 +176,7 @@ pub struct EventItem {
     pub sender_profile: Option<MemberProfile>,
     pub timestamp: MilliSecondsSinceUnixEpoch,
 
-    pub content: TimelineContent,
+    pub content: Box<TimelineContent>,
 
     pub reactions: IndexMap<String, ReactionDetails>,
     pub read_receipts: Vec<OwnedUserId>,
@@ -296,9 +330,10 @@ pub struct MemberProfile {
     pub presence: PresenceState,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum PresenceState {
     Online,
+    #[default]
     Offline,
     Unavailable,
     Unknown,
@@ -324,7 +359,7 @@ pub struct ReactionDetails {
 pub enum DeliveryStatus {
     Sending(OwnedTransactionId),
     Sent,
-    Error(String),
+    Error(ModelError),
     Synced,
 }
 
@@ -333,7 +368,7 @@ pub enum EncryptionStatus {
     Unencrypted,
     Verified,
     Unverified,
-    Undecryptable(String),
+    Undecryptable(ModelError),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -392,29 +427,33 @@ pub enum CallType {
     Video,
 }
 
-fn convert_media_source(source: RumaMediaSource) -> MediaSource {
-    match source {
-        RumaMediaSource::Plain(url) => MediaSource::Plain(url),
-        RumaMediaSource::Encrypted(file) => MediaSource::Encrypted(Box::new(*file)),
+impl From<RumaMediaSource> for MediaSource {
+    fn from(source: RumaMediaSource) -> Self {
+        match source {
+            RumaMediaSource::Plain(url) => MediaSource::Plain(url),
+            RumaMediaSource::Encrypted(file) => MediaSource::Encrypted(Box::new(*file)),
+        }
     }
 }
 
-fn convert_image_info(info: matrix_sdk::ruma::events::room::ImageInfo) -> ImageInfo {
-    ImageInfo {
-        height: info.height.map(|x| x.into()),
-        width: info.width.map(|x| x.into()),
-        mimetype: info.mimetype,
-        size: info.size.map(|x| x.into()),
-        thumbnail_source: info.thumbnail_source.map(convert_media_source),
-        thumbnail_info: info.thumbnail_info.map(|t| {
-            Box::new(ThumbnailInfo {
-                height: t.height.map(|x| x.into()),
-                width: t.width.map(|x| x.into()),
-                mimetype: t.mimetype,
-                size: t.size.map(|x| x.into()),
-            })
-        }),
-        blurhash: info.blurhash,
+impl From<matrix_sdk::ruma::events::room::ImageInfo> for ImageInfo {
+    fn from(info: matrix_sdk::ruma::events::room::ImageInfo) -> Self {
+        ImageInfo {
+            height: info.height.map(|x| x.into()),
+            width: info.width.map(|x| x.into()),
+            mimetype: info.mimetype,
+            size: info.size.map(|x| x.into()),
+            thumbnail_source: info.thumbnail_source.map(Into::into),
+            thumbnail_info: info.thumbnail_info.map(|t| {
+                Box::new(ThumbnailInfo {
+                    height: t.height.map(|x| x.into()),
+                    width: t.width.map(|x| x.into()),
+                    mimetype: t.mimetype,
+                    size: t.size.map(|x| x.into()),
+                })
+            }),
+            blurhash: info.blurhash,
+        }
     }
 }
 
@@ -428,25 +467,25 @@ impl From<RoomMessageEventContent> for TimelineContent {
             }),
             MessageType::Image(i) => TimelineContent::Message(MessageContent::Image {
                 body: i.body,
-                source: convert_media_source(i.source),
-                info: i.info.map(|info| convert_image_info(*info)),
+                source: i.source.into(),
+                info: i.info.map(|info| (*info).into()),
             }),
             MessageType::Video(v) => TimelineContent::Message(MessageContent::Video {
                 body: v.body,
-                source: convert_media_source(v.source),
+                source: v.source.into(),
                 info: v.info.map(|info| VideoInfo {
                     duration: info.duration.map(|d| d.as_millis() as u64),
                     height: info.height.map(|x| x.into()),
                     width: info.width.map(|x| x.into()),
                     mimetype: info.mimetype,
                     size: info.size.map(|x| x.into()),
-                    thumbnail_source: info.thumbnail_source.map(convert_media_source),
+                    thumbnail_source: info.thumbnail_source.map(Into::into),
                     blurhash: info.blurhash,
                 }),
             }),
             MessageType::Audio(a) => TimelineContent::Message(MessageContent::Audio {
                 body: a.body,
-                source: convert_media_source(a.source),
+                source: a.source.into(),
                 info: a.info.map(|info| AudioInfoWrapper {
                     duration: info.duration.map(|d| d.as_millis() as u64),
                     mimetype: info.mimetype,
@@ -458,7 +497,7 @@ impl From<RoomMessageEventContent> for TimelineContent {
             MessageType::File(f) => TimelineContent::Message(MessageContent::File {
                 body: f.body,
                 filename: f.filename.unwrap_or_default(),
-                source: convert_media_source(f.source),
+                source: f.source.into(),
             }),
             MessageType::Notice(n) => TimelineContent::Message(MessageContent::Notice {
                 body: n.body,

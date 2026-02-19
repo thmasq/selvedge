@@ -1,6 +1,6 @@
 use crate::model::{
-    DeliveryStatus, EventItem, RoomDetails, RoomListEntryDiff, RoomListEntryView, RoomSummary,
-    TimelineContent, TimelineDiff, TimelineItem,
+    ActorError, DeliveryStatus, EventItem, ModelError, RoomDetails, RoomListEntryDiff,
+    RoomListEntryView, RoomSummary, TimelineContent, TimelineDiff, TimelineItem,
 };
 use eyeball_im::VectorDiff;
 use futures::{StreamExt, channel::mpsc};
@@ -55,11 +55,13 @@ pub enum ToActor {
         data: Vec<u8>,
     },
     CreateRoom {
+        request_id: String,
         name: String,
         topic: Option<String>,
         is_encrypted: bool,
     },
     JoinRoom {
+        request_id: String,
         room_id: OwnedRoomId,
     },
     LeaveRoom {
@@ -77,8 +79,8 @@ pub enum ToActor {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ToShell {
     LoginSuccess,
-    LoginFailure(String),
-    SyncError(String),
+    LoginFailure(ActorError),
+    BackgroundError(ActorError),
     RoomListDiff(Vec<RoomListEntryDiff>),
     RoomDetailsUpdate {
         room_id: OwnedRoomId,
@@ -87,6 +89,11 @@ pub enum ToShell {
     TimelineDiff {
         room_id: OwnedRoomId,
         diff: Vec<TimelineDiff>,
+    },
+    CommandResult {
+        request_id: String,
+        success: bool,
+        error: Option<ActorError>,
     },
 }
 
@@ -200,11 +207,31 @@ impl MatrixActor {
                 }
                 vec![]
             }
-            ToActor::JoinRoom { room_id } => {
-                if let Some(client) = &self.client {
-                    let _ = client.join_room_by_id(&room_id).await;
-                }
-                vec![]
+            ToActor::JoinRoom {
+                request_id,
+                room_id,
+            } => {
+                let response = if let Some(client) = &self.client {
+                    match client.join_room_by_id(&room_id).await {
+                        Ok(_) => ToShell::CommandResult {
+                            request_id,
+                            success: true,
+                            error: None,
+                        },
+                        Err(e) => ToShell::CommandResult {
+                            request_id,
+                            success: false,
+                            error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                        },
+                    }
+                } else {
+                    ToShell::CommandResult {
+                        request_id,
+                        success: false,
+                        error: Some(ActorError::ClientNotInitialized),
+                    }
+                };
+                vec![response]
             }
             ToActor::LeaveRoom { room_id } => {
                 if let Some(client) = &self.client {
@@ -216,25 +243,46 @@ impl MatrixActor {
                 vec![]
             }
             ToActor::CreateRoom {
+                request_id,
                 name,
                 topic,
                 is_encrypted: _,
             } => {
-                if let Some(client) = &self.client {
-                    use matrix_sdk::ruma::api::client::room::create_room::v3::Request as CreateRoomRequest;
-
-                    let mut request = CreateRoomRequest::new();
+                let response = if let Some(client) = &self.client {
+                    let mut request =
+                        matrix_sdk::ruma::api::client::room::create_room::v3::Request::new();
                     request.name = Some(name);
                     request.topic = topic;
 
                     // TODO: Add an m.room.encryption state event to `request.initial_state`
-                    let _ = client.create_room(request).await;
-                }
-                vec![]
+                    match client.create_room(request).await {
+                        Ok(_) => ToShell::CommandResult {
+                            request_id,
+                            success: true,
+                            error: None,
+                        },
+                        Err(e) => ToShell::CommandResult {
+                            request_id,
+                            success: false,
+                            error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                        },
+                    }
+                } else {
+                    ToShell::CommandResult {
+                        request_id,
+                        success: false,
+                        error: Some(ActorError::ClientNotInitialized),
+                    }
+                };
+                vec![response]
             }
             ToActor::LoadHistory { room_id } => {
                 if let Some(timeline) = self.active_timelines.get(&room_id) {
-                    let _ = timeline.paginate_backwards(20).await;
+                    if let Err(e) = timeline.paginate_backwards(20).await {
+                        return vec![ToShell::BackgroundError(ActorError::PaginationFailed(
+                            e.to_string(),
+                        ))];
+                    }
                 }
                 vec![]
             }
@@ -252,9 +300,13 @@ impl MatrixActor {
                     self.client = Some(client);
                     vec![ToShell::LoginSuccess]
                 }
-                Err(e) => vec![ToShell::LoginFailure(e.to_string())],
+                Err(e) => vec![ToShell::LoginFailure(ActorError::LoginFailed(
+                    e.to_string(),
+                ))],
             },
-            Err(e) => vec![ToShell::LoginFailure(e.to_string())],
+            Err(e) => vec![ToShell::LoginFailure(ActorError::LoginFailed(
+                e.to_string(),
+            ))],
         }
     }
 
@@ -267,10 +319,14 @@ impl MatrixActor {
                     self.client = Some(client);
                     vec![ToShell::LoginSuccess]
                 } else {
-                    vec![ToShell::LoginFailure("No saved session found".to_string())]
+                    vec![ToShell::LoginFailure(ActorError::LoginFailed(
+                        "No saved session found".to_string(),
+                    ))]
                 }
             }
-            Err(e) => vec![ToShell::LoginFailure(e.to_string())],
+            Err(e) => vec![ToShell::LoginFailure(ActorError::LoginFailed(
+                e.to_string(),
+            ))],
         }
     }
 
@@ -320,7 +376,9 @@ impl MatrixActor {
                         }
                     }
                     Err(e) => {
-                        let _ = sender.unbounded_send(ToShell::SyncError(e.to_string()));
+                        let _ = sender.unbounded_send(ToShell::BackgroundError(
+                            ActorError::SyncInitializationFailed(e.to_string()),
+                        ));
                     }
                 }
             });
@@ -416,9 +474,9 @@ fn map_timeline_item_safe(item: &matrix_sdk_ui::timeline::TimelineItem) -> Timel
                         DeliveryStatus::Sending(OwnedTransactionId::from("dummy"))
                     }
                     EventSendState::Sent { .. } => DeliveryStatus::Sent,
-                    EventSendState::SendingFailed { .. } => {
-                        DeliveryStatus::Error("Failed to send".to_string())
-                    }
+                    EventSendState::SendingFailed { .. } => DeliveryStatus::Error(
+                        ModelError::DeliveryFailed("Failed to send".to_string()),
+                    ),
                 }
             } else {
                 DeliveryStatus::Synced
@@ -440,7 +498,7 @@ fn map_timeline_item_safe(item: &matrix_sdk_ui::timeline::TimelineItem) -> Timel
                 sender: event.sender().to_owned(),
                 sender_profile: None,
                 timestamp: MilliSecondsSinceUnixEpoch(event.timestamp().0.into()),
-                content,
+                content: Box::new(content),
                 reactions: Default::default(),
                 read_receipts: Default::default(),
                 delivery_status,
