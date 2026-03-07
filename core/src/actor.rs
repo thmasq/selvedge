@@ -7,6 +7,11 @@ use futures::{StreamExt, channel::mpsc};
 use gloo_worker::HandlerId;
 use gloo_worker::{Worker, WorkerScope};
 use indexmap::IndexMap;
+use matrix_sdk::ruma::api::client::to_device::send_event_to_device::v3::Request as ToDeviceRequest;
+use matrix_sdk::ruma::events::AnyToDeviceEventContent;
+use matrix_sdk::ruma::events::room_key_request::{
+    Action, RequestedKeyInfo, ToDeviceRoomKeyRequestEventContent,
+};
 use matrix_sdk::{
     Client,
     attachment::AttachmentConfig,
@@ -158,6 +163,12 @@ pub enum ToActor {
         device_id: String,
         uia_session: Option<String>,
         password: Option<String>,
+    },
+    RequestRoomKey {
+        request_id: String,
+        room_id: OwnedRoomId,
+        session_id: String,
+        sender_key: String,
     },
 }
 
@@ -1136,6 +1147,124 @@ impl MatrixActor {
                 };
                 vec![response]
             }
+            ToActor::RequestRoomKey {
+                request_id,
+                room_id,
+                session_id,
+                sender_key,
+            } => {
+                let client = self.client.borrow().clone();
+                let response = if let Some(client) = client {
+                    if let (Some(user_id), Some(current_device)) =
+                        (client.user_id(), client.device_id())
+                    {
+                        if let Ok(devices) = client.encryption().get_user_devices(user_id).await {
+                            let mut target_devices = Vec::new();
+
+                            for device in devices.devices() {
+                                if device.device_id() != current_device
+                                    && device.is_cross_signed_by_owner()
+                                {
+                                    target_devices.push(device.device_id().to_owned());
+                                }
+                            }
+
+                            if !target_devices.is_empty() {
+                                let body = RequestedKeyInfo::new(
+                                    EventEncryptionAlgorithm::MegolmV1AesSha2,
+                                    room_id,
+                                    sender_key,
+                                    session_id,
+                                );
+
+                                let txn_id = matrix_sdk::ruma::TransactionId::new();
+                                let content = ToDeviceRoomKeyRequestEventContent::new(
+                                    Action::Request,
+                                    Some(body),
+                                    current_device.to_owned(),
+                                    txn_id.clone(),
+                                );
+
+                                match matrix_sdk::ruma::serde::Raw::new(&content) {
+                                    Ok(raw) => {
+                                        let raw_content = raw.cast::<AnyToDeviceEventContent>();
+
+                                        let mut device_map = std::collections::BTreeMap::new();
+                                        for target_device in target_devices {
+                                            device_map.insert(
+                                                ruma::to_device::DeviceIdOrAllDevices::DeviceId(
+                                                    target_device,
+                                                ),
+                                                raw_content.clone(),
+                                            );
+                                        }
+
+                                        let mut messages = std::collections::BTreeMap::new();
+                                        messages.insert(user_id.to_owned(), device_map);
+
+                                        let request = ToDeviceRequest::new_raw(
+                                            "m.room_key_request".into(),
+                                            txn_id,
+                                            messages,
+                                        );
+
+                                        match client.send(request).await {
+                                            Ok(_) => ToShell::CommandResult {
+                                                request_id,
+                                                success: true,
+                                                error: None,
+                                            },
+                                            Err(e) => ToShell::CommandResult {
+                                                request_id,
+                                                success: false,
+                                                error: Some(ActorError::RoomOperationFailed(
+                                                    e.to_string(),
+                                                )),
+                                            },
+                                        }
+                                    }
+                                    Err(e) => ToShell::CommandResult {
+                                        request_id,
+                                        success: false,
+                                        error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                                    },
+                                }
+                            } else {
+                                ToShell::CommandResult {
+                                    request_id,
+                                    success: false,
+                                    error: Some(ActorError::RoomOperationFailed(
+                                        "No other verified devices found to request keys from."
+                                            .into(),
+                                    )),
+                                }
+                            }
+                        } else {
+                            ToShell::CommandResult {
+                                request_id,
+                                success: false,
+                                error: Some(ActorError::RoomOperationFailed(
+                                    "Failed to fetch user devices".into(),
+                                )),
+                            }
+                        }
+                    } else {
+                        ToShell::CommandResult {
+                            request_id,
+                            success: false,
+                            error: Some(ActorError::ClientNotInitialized),
+                        }
+                    }
+                } else {
+                    ToShell::CommandResult {
+                        request_id,
+                        success: false,
+                        error: Some(ActorError::ClientNotInitialized),
+                    }
+                };
+
+                vec![response]
+            }
         }
     }
 
@@ -1516,18 +1645,29 @@ fn map_timeline_item_safe(item: &matrix_sdk_ui::timeline::TimelineItem) -> Timel
                 if let Some(raw_json) = event.latest_json() {
                     if let Ok(Some(event_type)) = raw_json.get_field::<String>("type") {
                         if event_type == "m.room.encrypted" {
-                            let session_id = raw_json
+                            let content_val = raw_json
                                 .get_field::<serde_json::Value>("content")
                                 .ok()
-                                .flatten()
-                                .and_then(|c| {
-                                    c.get("session_id")
-                                        .and_then(|s| s.as_str())
-                                        .map(ToString::to_string)
-                                })
-                                .unwrap_or_default();
+                                .flatten();
 
-                            content = TimelineContent::Undecryptable { session_id };
+                            let session_id = content_val
+                                .as_ref()
+                                .and_then(|c| c.get("session_id"))
+                                .and_then(|s| s.as_str())
+                                .unwrap_or_default()
+                                .to_string();
+
+                            let sender_key = content_val
+                                .as_ref()
+                                .and_then(|c| c.get("sender_key"))
+                                .and_then(|s| s.as_str())
+                                .unwrap_or_default()
+                                .to_string();
+
+                            content = TimelineContent::Undecryptable {
+                                session_id,
+                                sender_key,
+                            };
                         }
                     }
                 }

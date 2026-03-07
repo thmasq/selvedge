@@ -215,10 +215,15 @@ pub enum TimelineContent {
     Poll(PollState),
     Call(CallContent),
     Verification(VerificationRequest),
-    Redaction { reason: Option<String> },
+    Redaction {
+        reason: Option<String>,
+    },
     Unsupported,
     Redacted,
-    Undecryptable { session_id: String },
+    Undecryptable {
+        session_id: String,
+        sender_key: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
