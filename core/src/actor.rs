@@ -10,7 +10,7 @@ use indexmap::IndexMap;
 use matrix_sdk::{
     Client,
     attachment::AttachmentConfig,
-    encryption::verification::SasVerification,
+    encryption::verification::{QrVerification, SasVerification},
     ruma::{
         EventEncryptionAlgorithm, OwnedEventId, OwnedRoomId, OwnedTransactionId, OwnedUserId,
         events::AnyInitialStateEvent, events::ToDeviceEvent,
@@ -139,6 +139,17 @@ pub enum ToActor {
         passphrase: String,
         payload: Vec<u8>,
     },
+    GenerateQrCode {
+        request_id: String,
+        user_id: OwnedUserId,
+        flow_id: String,
+    },
+    ConfirmQrScan {
+        request_id: String,
+        user_id: OwnedUserId,
+        flow_id: String,
+        scanned_data: Vec<u8>,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -172,6 +183,10 @@ pub enum ToShell {
     KeysExported {
         request_id: String,
         payload: String,
+    },
+    QrCodeGenerated {
+        request_id: String,
+        payload: Vec<u8>,
     },
 }
 
@@ -226,7 +241,8 @@ struct MatrixActor {
     client: RefCell<Option<Client>>,
     event_sender: mpsc::UnboundedSender<ToShell>,
     active_timelines: RefCell<HashMap<OwnedRoomId, Rc<Timeline>>>,
-    active_verifications: RefCell<HashMap<String, SasVerification>>,
+    active_sas_verifications: RefCell<HashMap<String, SasVerification>>,
+    active_qr_verifications: RefCell<HashMap<String, QrVerification>>,
 }
 
 impl MatrixActor {
@@ -235,7 +251,8 @@ impl MatrixActor {
             client: RefCell::new(None),
             event_sender,
             active_timelines: RefCell::new(HashMap::new()),
-            active_verifications: RefCell::new(HashMap::new()),
+            active_sas_verifications: RefCell::new(HashMap::new()),
+            active_qr_verifications: RefCell::new(HashMap::new()),
         }
     }
 
@@ -503,8 +520,11 @@ impl MatrixActor {
                                 error: Some(ActorError::RoomOperationFailed(e.to_string())),
                             },
                         }
-                    } else if let Some(sas) =
-                        self.active_verifications.borrow().get(&flow_id).cloned()
+                    } else if let Some(sas) = self
+                        .active_sas_verifications
+                        .borrow()
+                        .get(&flow_id)
+                        .cloned()
                     {
                         match sas.accept().await {
                             Ok(_) => ToShell::CommandResult {
@@ -542,7 +562,11 @@ impl MatrixActor {
                 flow_id,
                 emojis_match,
             } => {
-                let verification = self.active_verifications.borrow().get(&flow_id).cloned();
+                let verification = self
+                    .active_sas_verifications
+                    .borrow()
+                    .get(&flow_id)
+                    .cloned();
                 let response = if let Some(sas) = verification {
                     let res = if emojis_match {
                         sas.confirm().await
@@ -577,7 +601,11 @@ impl MatrixActor {
                 user_id: _,
                 flow_id,
             } => {
-                let verification = self.active_verifications.borrow().get(&flow_id).cloned();
+                let verification = self
+                    .active_sas_verifications
+                    .borrow()
+                    .get(&flow_id)
+                    .cloned();
                 let response = if let Some(sas) = verification {
                     match sas.cancel().await {
                         Ok(_) => ToShell::CommandResult {
@@ -845,6 +873,132 @@ impl MatrixActor {
                     error: Some(ActorError::RoomOperationFailed(
                         "Manual file import is not supported in the web environment. Please use Account Recovery / Key Backup instead.".into(),
                     )),
+                };
+                vec![response]
+            }
+            ToActor::GenerateQrCode {
+                request_id,
+                user_id,
+                flow_id,
+            } => {
+                let client = self.client.borrow().clone();
+                let response = if let Some(client) = client {
+                    if let Some(request) = client
+                        .encryption()
+                        .get_verification_request(&user_id, &flow_id)
+                        .await
+                    {
+                        match request.generate_qr_code().await {
+                            Ok(Some(qr)) => {
+                                let bytes = qr.to_bytes().unwrap_or_default();
+                                self.active_qr_verifications
+                                    .borrow_mut()
+                                    .insert(flow_id.clone(), qr);
+                                ToShell::QrCodeGenerated {
+                                    request_id,
+                                    payload: bytes,
+                                }
+                            }
+                            Ok(None) => ToShell::CommandResult {
+                                request_id,
+                                success: false,
+                                error: Some(ActorError::RoomOperationFailed(
+                                    "Could not generate QR code (not supported or invalid state)"
+                                        .into(),
+                                )),
+                            },
+                            Err(e) => ToShell::CommandResult {
+                                request_id,
+                                success: false,
+                                error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                            },
+                        }
+                    } else {
+                        ToShell::CommandResult {
+                            request_id,
+                            success: false,
+                            error: Some(ActorError::RoomOperationFailed(
+                                "Verification flow not found".into(),
+                            )),
+                        }
+                    }
+                } else {
+                    ToShell::CommandResult {
+                        request_id,
+                        success: false,
+                        error: Some(ActorError::ClientNotInitialized),
+                    }
+                };
+                vec![response]
+            }
+
+            ToActor::ConfirmQrScan {
+                request_id,
+                user_id,
+                flow_id,
+                scanned_data,
+            } => {
+                let client = self.client.borrow().clone();
+                let response = if let Some(client) = client {
+                    if let Some(request) = client
+                        .encryption()
+                        .get_verification_request(&user_id, &flow_id)
+                        .await
+                    {
+                        match matrix_sdk::encryption::verification::QrVerificationData::from_bytes(
+                            &scanned_data,
+                        ) {
+                            Ok(qr_data) => match request.scan_qr_code(qr_data).await {
+                                Ok(Some(qr)) => match qr.confirm().await {
+                                    Ok(_) => ToShell::CommandResult {
+                                        request_id,
+                                        success: true,
+                                        error: None,
+                                    },
+                                    Err(e) => ToShell::CommandResult {
+                                        request_id,
+                                        success: false,
+                                        error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                                    },
+                                },
+                                Ok(None) => ToShell::CommandResult {
+                                    request_id,
+                                    success: false,
+                                    error: Some(ActorError::RoomOperationFailed(
+                                        "Scanned QR code does not match this verification flow"
+                                            .into(),
+                                    )),
+                                },
+                                Err(e) => ToShell::CommandResult {
+                                    request_id,
+                                    success: false,
+                                    error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                                },
+                            },
+                            Err(e) => ToShell::CommandResult {
+                                request_id,
+                                success: false,
+                                error: Some(ActorError::RoomOperationFailed(format!(
+                                    "Invalid QR data: {}",
+                                    e
+                                ))),
+                            },
+                        }
+                    } else {
+                        ToShell::CommandResult {
+                            request_id,
+                            success: false,
+                            error: Some(ActorError::RoomOperationFailed(
+                                "Verification flow not found".into(),
+                            )),
+                        }
+                    }
+                } else {
+                    ToShell::CommandResult {
+                        request_id,
+                        success: false,
+                        error: Some(ActorError::ClientNotInitialized),
+                    }
                 };
                 vec![response]
             }

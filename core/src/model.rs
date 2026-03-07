@@ -427,6 +427,8 @@ pub enum VerificationState {
     Started { method: VerificationMethod },
     SasEmoji { emoji: Vec<(String, String)> },
     SasDecimal { decimals: (u16, u16, u16) },
+    ShowQr { bytes: Vec<u8> },
+    QrScanned,
     Cancelled,
     Done,
 }
