@@ -347,6 +347,16 @@ pub struct MemberProfile {
     pub is_verified: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceInfo {
+    pub device_id: String,
+    pub display_name: Option<String>,
+    pub last_seen_ts: Option<u64>,
+    pub last_seen_ip: Option<String>,
+    pub is_verified: bool,
+    pub is_current_device: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum PresenceState {
     Online,

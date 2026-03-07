@@ -1,5 +1,5 @@
 use crate::model::{
-    ActorError, DeliveryStatus, EventItem, ModelError, RoomDetails, RoomListEntryDiff,
+    ActorError, DeliveryStatus, DeviceInfo, EventItem, ModelError, RoomDetails, RoomListEntryDiff,
     RoomListEntryView, RoomSummary, TimelineContent, TimelineDiff, TimelineItem, VerificationState,
 };
 use eyeball_im::VectorDiff;
@@ -150,6 +150,15 @@ pub enum ToActor {
         flow_id: String,
         scanned_data: Vec<u8>,
     },
+    GetMyDevices {
+        request_id: String,
+    },
+    DeleteDevice {
+        request_id: String,
+        device_id: String,
+        uia_session: Option<String>,
+        password: Option<String>,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -187,6 +196,10 @@ pub enum ToShell {
     QrCodeGenerated {
         request_id: String,
         payload: Vec<u8>,
+    },
+    DeviceListResult {
+        request_id: String,
+        devices: Vec<DeviceInfo>,
     },
 }
 
@@ -991,6 +1004,127 @@ impl MatrixActor {
                             error: Some(ActorError::RoomOperationFailed(
                                 "Verification flow not found".into(),
                             )),
+                        }
+                    }
+                } else {
+                    ToShell::CommandResult {
+                        request_id,
+                        success: false,
+                        error: Some(ActorError::ClientNotInitialized),
+                    }
+                };
+                vec![response]
+            }
+            ToActor::GetMyDevices { request_id } => {
+                let client = self.client.borrow().clone();
+                let response = if let Some(client) = client {
+                    match client.devices().await {
+                        Ok(response) => {
+                            let mut device_infos = Vec::new();
+                            let user_id = client.user_id().unwrap();
+                            let current_device_id = client.device_id().unwrap();
+
+                            let crypto_devices =
+                                client.encryption().get_user_devices(user_id).await.ok();
+
+                            for device in response.devices {
+                                let is_verified = if let Some(cd) = &crypto_devices {
+                                    cd.devices()
+                                        .find(|d| d.device_id() == device.device_id)
+                                        .map(|d| d.is_cross_signed_by_owner())
+                                        .unwrap_or(false)
+                                } else {
+                                    false
+                                };
+
+                                device_infos.push(crate::model::DeviceInfo {
+                                    device_id: device.device_id.to_string(),
+                                    display_name: device.display_name,
+                                    last_seen_ts: device.last_seen_ts.map(|ts| ts.0.into()),
+                                    last_seen_ip: device.last_seen_ip,
+                                    is_verified,
+                                    is_current_device: device.device_id == current_device_id,
+                                });
+                            }
+
+                            ToShell::DeviceListResult {
+                                request_id,
+                                devices: device_infos,
+                            }
+                        }
+                        Err(e) => ToShell::CommandResult {
+                            request_id,
+                            success: false,
+                            error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                        },
+                    }
+                } else {
+                    ToShell::CommandResult {
+                        request_id,
+                        success: false,
+                        error: Some(ActorError::ClientNotInitialized),
+                    }
+                };
+                vec![response]
+            }
+
+            ToActor::DeleteDevice {
+                request_id,
+                device_id,
+                uia_session,
+                password,
+            } => {
+                let client = self.client.borrow().clone();
+                let response = if let Some(client) = client {
+                    let auth_data = if let (Some(session), Some(pass)) = (uia_session, password) {
+                        let identifier =
+                            matrix_sdk::ruma::api::client::uiaa::UserIdentifier::UserIdOrLocalpart(
+                                client
+                                    .user_id()
+                                    .map(|id| id.to_string())
+                                    .unwrap_or_default(),
+                            );
+                        let mut uiaa_password =
+                            matrix_sdk::ruma::api::client::uiaa::Password::new(identifier, pass);
+                        uiaa_password.session = Some(session);
+                        Some(matrix_sdk::ruma::api::client::uiaa::AuthData::Password(
+                            uiaa_password,
+                        ))
+                    } else {
+                        None
+                    };
+
+                    let device_id_owned = matrix_sdk::ruma::OwnedDeviceId::from(device_id);
+                    let mut request =
+                        matrix_sdk::ruma::api::client::device::delete_devices::v3::Request::new(
+                            vec![device_id_owned],
+                        );
+
+                    if let Some(auth) = auth_data {
+                        request.auth = Some(auth);
+                    }
+
+                    match client.send(request).await {
+                        Ok(_) => ToShell::CommandResult {
+                            request_id,
+                            success: true,
+                            error: None,
+                        },
+                        Err(e) => {
+                            if let Some(uiaa_info) = e.as_uiaa_response() {
+                                if let Some(session) = &uiaa_info.session {
+                                    return vec![ToShell::UiaaPrompt {
+                                        request_id,
+                                        session: session.clone(),
+                                    }];
+                                }
+                            }
+
+                            ToShell::CommandResult {
+                                request_id,
+                                success: false,
+                                error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                            }
                         }
                     }
                 } else {
