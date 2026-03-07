@@ -33,12 +33,13 @@ matrix-sdk-ui = { version = "0.16.0", default-features = false, features = ["rus
 mime = "0.3.17"
 ruma = { version = "0.14.1", features = ["full"] }
 serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
 thiserror = "2.0.18"
 wasm-bindgen = "0.2.108"
 wasm-bindgen-futures = "0.4.58"
 web-sys = { version = "0.3.85", features = ["ServiceWorkerGlobalScope", "FetchEvent", "Cache", "CacheStorage", "Request", "Response"] }
 
 [profile.release]
-opt-level = "z"
-lto = "fat"
-codegen-units = 1
+# opt-level = "z"
+# lto = "fat"
+# codegen-units = 1

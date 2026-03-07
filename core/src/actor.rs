@@ -1,6 +1,6 @@
 use crate::model::{
     ActorError, DeliveryStatus, EventItem, ModelError, RoomDetails, RoomListEntryDiff,
-    RoomListEntryView, RoomSummary, TimelineContent, TimelineDiff, TimelineItem,
+    RoomListEntryView, RoomSummary, TimelineContent, TimelineDiff, TimelineItem, VerificationState,
 };
 use eyeball_im::VectorDiff;
 use futures::{StreamExt, channel::mpsc};
@@ -10,9 +10,13 @@ use indexmap::IndexMap;
 use matrix_sdk::{
     Client,
     attachment::AttachmentConfig,
+    encryption::verification::SasVerification,
     ruma::{
-        OwnedEventId, OwnedRoomId, OwnedTransactionId,
-        events::room::message::RoomMessageEventContent,
+        EventEncryptionAlgorithm, OwnedEventId, OwnedRoomId, OwnedTransactionId, OwnedUserId,
+        events::AnyInitialStateEvent, events::ToDeviceEvent,
+        events::key::verification::request::ToDeviceKeyVerificationRequestEventContent,
+        events::room::encryption::RoomEncryptionEventContent,
+        events::room::message::RoomMessageEventContent, serde::Raw,
     },
 };
 use matrix_sdk_ui::timeline::RoomExt;
@@ -79,6 +83,47 @@ pub enum ToActor {
     LoadHistory {
         room_id: OwnedRoomId,
     },
+    RequestVerification {
+        request_id: String,
+        user_id: OwnedUserId,
+    },
+    AcceptVerification {
+        request_id: String,
+        user_id: OwnedUserId,
+        flow_id: String,
+    },
+    ConfirmVerification {
+        request_id: String,
+        user_id: OwnedUserId,
+        flow_id: String,
+        emojis_match: bool,
+    },
+    CancelVerification {
+        request_id: String,
+        user_id: OwnedUserId,
+        flow_id: String,
+    },
+    SetupRecovery {
+        request_id: String,
+        passphrase: String,
+    },
+    RecoverIdentity {
+        request_id: String,
+        passphrase: String,
+    },
+    EnableKeyBackup {
+        request_id: String,
+        passphrase: String,
+    },
+    RestoreKeyBackup {
+        request_id: String,
+        passphrase: String,
+    },
+    RetryDecryption {
+        request_id: String,
+        room_id: OwnedRoomId,
+        session_id: String,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -99,6 +144,11 @@ pub enum ToShell {
         request_id: String,
         success: bool,
         error: Option<ActorError>,
+    },
+    VerificationUpdate {
+        user_id: OwnedUserId,
+        flow_id: String,
+        state: VerificationState,
     },
 }
 
@@ -153,6 +203,7 @@ struct MatrixActor {
     client: RefCell<Option<Client>>,
     event_sender: mpsc::UnboundedSender<ToShell>,
     active_timelines: RefCell<HashMap<OwnedRoomId, Rc<Timeline>>>,
+    active_verifications: RefCell<HashMap<String, SasVerification>>,
 }
 
 impl MatrixActor {
@@ -161,6 +212,7 @@ impl MatrixActor {
             client: RefCell::new(None),
             event_sender,
             active_timelines: RefCell::new(HashMap::new()),
+            active_verifications: RefCell::new(HashMap::new()),
         }
     }
 
@@ -302,7 +354,7 @@ impl MatrixActor {
                 request_id,
                 name,
                 topic,
-                is_encrypted: _,
+                is_encrypted,
             } => {
                 let client = self.client.borrow().clone();
                 let response = if let Some(client) = client {
@@ -311,7 +363,24 @@ impl MatrixActor {
                     request.name = Some(name);
                     request.topic = topic;
 
-                    // TODO: Add an m.room.encryption state event to `request.initial_state`
+                    if is_encrypted {
+                        let content = RoomEncryptionEventContent::new(
+                            EventEncryptionAlgorithm::MegolmV1AesSha2,
+                        );
+
+                        let raw_event = serde_json::json!({
+                            "type": "m.room.encryption",
+                            "state_key": "",
+                            "content": content
+                        });
+
+                        if let Ok(raw_initial_state) =
+                            serde_json::from_value::<Raw<AnyInitialStateEvent>>(raw_event)
+                        {
+                            request.initial_state.push(raw_initial_state);
+                        }
+                    }
+
                     match client.create_room(request).await {
                         Ok(_) => ToShell::CommandResult {
                             request_id,
@@ -343,6 +412,280 @@ impl MatrixActor {
                     ))];
                 }
                 vec![]
+            }
+            ToActor::RequestVerification {
+                request_id,
+                user_id,
+            } => {
+                let client = self.client.borrow().clone();
+                let response = if let Some(client) = client {
+                    match client.encryption().request_user_identity(&user_id).await {
+                        Ok(Some(user_identity)) => {
+                            match user_identity.request_verification().await {
+                                Ok(_) => ToShell::CommandResult {
+                                    request_id,
+                                    success: true,
+                                    error: None,
+                                },
+                                Err(e) => ToShell::CommandResult {
+                                    request_id,
+                                    success: false,
+                                    error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                                },
+                            }
+                        }
+                        Ok(None) => ToShell::CommandResult {
+                            request_id,
+                            success: false,
+                            error: Some(ActorError::RoomOperationFailed(
+                                "User identity not found on the server".into(),
+                            )),
+                        },
+                        Err(e) => ToShell::CommandResult {
+                            request_id,
+                            success: false,
+                            error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                        },
+                    }
+                } else {
+                    ToShell::CommandResult {
+                        request_id,
+                        success: false,
+                        error: Some(ActorError::ClientNotInitialized),
+                    }
+                };
+                vec![response]
+            }
+            ToActor::AcceptVerification {
+                request_id,
+                user_id: _,
+                flow_id,
+            } => {
+                let verification = self.active_verifications.borrow().get(&flow_id).cloned();
+                let response = if let Some(sas) = verification {
+                    match sas.accept().await {
+                        Ok(_) => ToShell::CommandResult {
+                            request_id,
+                            success: true,
+                            error: None,
+                        },
+                        Err(e) => ToShell::CommandResult {
+                            request_id,
+                            success: false,
+                            error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                        },
+                    }
+                } else {
+                    ToShell::CommandResult {
+                        request_id,
+                        success: false,
+                        error: Some(ActorError::RoomOperationFailed(
+                            "Verification flow not found".into(),
+                        )),
+                    }
+                };
+                vec![response]
+            }
+            ToActor::ConfirmVerification {
+                request_id,
+                user_id: _,
+                flow_id,
+                emojis_match,
+            } => {
+                let verification = self.active_verifications.borrow().get(&flow_id).cloned();
+                let response = if let Some(sas) = verification {
+                    let res = if emojis_match {
+                        sas.confirm().await
+                    } else {
+                        sas.cancel().await
+                    };
+                    match res {
+                        Ok(_) => ToShell::CommandResult {
+                            request_id,
+                            success: true,
+                            error: None,
+                        },
+                        Err(e) => ToShell::CommandResult {
+                            request_id,
+                            success: false,
+                            error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                        },
+                    }
+                } else {
+                    ToShell::CommandResult {
+                        request_id,
+                        success: false,
+                        error: Some(ActorError::RoomOperationFailed(
+                            "Verification flow not found".into(),
+                        )),
+                    }
+                };
+                vec![response]
+            }
+            ToActor::CancelVerification {
+                request_id,
+                user_id: _,
+                flow_id,
+            } => {
+                let verification = self.active_verifications.borrow().get(&flow_id).cloned();
+                let response = if let Some(sas) = verification {
+                    match sas.cancel().await {
+                        Ok(_) => ToShell::CommandResult {
+                            request_id,
+                            success: true,
+                            error: None,
+                        },
+                        Err(e) => ToShell::CommandResult {
+                            request_id,
+                            success: false,
+                            error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                        },
+                    }
+                } else {
+                    ToShell::CommandResult {
+                        request_id,
+                        success: false,
+                        error: Some(ActorError::RoomOperationFailed(
+                            "Verification flow not found".into(),
+                        )),
+                    }
+                };
+                vec![response]
+            }
+            ToActor::SetupRecovery {
+                request_id,
+                passphrase,
+            } => {
+                let client = self.client.borrow().clone();
+                let response = if let Some(client) = client {
+                    match client
+                        .encryption()
+                        .recovery()
+                        .enable()
+                        .with_passphrase(&passphrase)
+                        .await
+                    {
+                        Ok(_) => ToShell::CommandResult {
+                            request_id,
+                            success: true,
+                            error: None,
+                        },
+                        Err(e) => ToShell::CommandResult {
+                            request_id,
+                            success: false,
+                            error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                        },
+                    }
+                } else {
+                    ToShell::CommandResult {
+                        request_id,
+                        success: false,
+                        error: Some(ActorError::ClientNotInitialized),
+                    }
+                };
+                vec![response]
+            }
+            ToActor::RecoverIdentity {
+                request_id,
+                passphrase,
+            } => {
+                let client = self.client.borrow().clone();
+                let response = if let Some(client) = client {
+                    match client.encryption().recovery().recover(&passphrase).await {
+                        Ok(_) => ToShell::CommandResult {
+                            request_id,
+                            success: true,
+                            error: None,
+                        },
+                        Err(e) => ToShell::CommandResult {
+                            request_id,
+                            success: false,
+                            error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                        },
+                    }
+                } else {
+                    ToShell::CommandResult {
+                        request_id,
+                        success: false,
+                        error: Some(ActorError::ClientNotInitialized),
+                    }
+                };
+                vec![response]
+            }
+            ToActor::EnableKeyBackup {
+                request_id,
+                passphrase: _,
+            } => {
+                let client = self.client.borrow().clone();
+                let response = if let Some(client) = client {
+                    match client.encryption().backups().create().await {
+                        Ok(_) => ToShell::CommandResult {
+                            request_id,
+                            success: true,
+                            error: None,
+                        },
+                        Err(e) => ToShell::CommandResult {
+                            request_id,
+                            success: false,
+                            error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                        },
+                    }
+                } else {
+                    ToShell::CommandResult {
+                        request_id,
+                        success: false,
+                        error: Some(ActorError::ClientNotInitialized),
+                    }
+                };
+                vec![response]
+            }
+            ToActor::RestoreKeyBackup {
+                request_id,
+                passphrase,
+            } => {
+                let client = self.client.borrow().clone();
+                let response = if let Some(client) = client {
+                    match client.encryption().recovery().recover(&passphrase).await {
+                        Ok(_) => ToShell::CommandResult {
+                            request_id,
+                            success: true,
+                            error: None,
+                        },
+                        Err(e) => ToShell::CommandResult {
+                            request_id,
+                            success: false,
+                            error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                        },
+                    }
+                } else {
+                    ToShell::CommandResult {
+                        request_id,
+                        success: false,
+                        error: Some(ActorError::ClientNotInitialized),
+                    }
+                };
+                vec![response]
+            }
+            ToActor::RetryDecryption {
+                request_id,
+                room_id: _,
+                session_id: _,
+            } => {
+                let client = self.client.borrow().clone();
+                let response = if client.is_some() {
+                    ToShell::CommandResult {
+                        request_id,
+                        success: true,
+                        error: None,
+                    }
+                } else {
+                    ToShell::CommandResult {
+                        request_id,
+                        success: false,
+                        error: Some(ActorError::ClientNotInitialized),
+                    }
+                };
+                vec![response]
             }
         }
     }
@@ -395,6 +738,34 @@ impl MatrixActor {
         if let Some(client) = client {
             let sender = self.event_sender.clone();
 
+            let verification_sender = sender.clone();
+
+            client.add_event_handler(
+                move |ev: ToDeviceEvent<ToDeviceKeyVerificationRequestEventContent>,
+                      _client: Client| {
+                    let sender_for_async = verification_sender.clone();
+                    async move {
+                        let user_id = ev.sender.clone();
+                        let flow_id = ev.content.transaction_id.to_string();
+                        if let Some(matrix_sdk::encryption::verification::Verification::SasV1(
+                            _sas,
+                        )) = _client
+                            .encryption()
+                            .get_verification(&user_id, &flow_id)
+                            .await
+                        {
+                            let _ = sender_for_async.unbounded_send(ToShell::VerificationUpdate {
+                                user_id,
+                                flow_id,
+                                state: crate::model::VerificationState::Requested {
+                                    methods: ev.content.methods,
+                                },
+                            });
+                        }
+                    }
+                },
+            );
+
             spawn_local(async move {
                 match RoomListService::new(client.clone()).await {
                     Ok(room_list_service) => {
@@ -412,6 +783,7 @@ impl MatrixActor {
                         {
                             let svc = room_list_service;
                             let sender = sender.clone();
+                            let mapper_client = client.clone();
 
                             spawn_local(async move {
                                 if let Ok(all_rooms) = svc.all_rooms().await {
@@ -424,7 +796,9 @@ impl MatrixActor {
 
                                     while let Some(diffs) = entries_stream.next().await {
                                         let mapped = futures::future::join_all(
-                                            diffs.into_iter().map(map_room_list_diff),
+                                            diffs.into_iter().map(|diff| {
+                                                map_room_list_diff(mapper_client.clone(), diff)
+                                            }),
                                         )
                                         .await;
 
@@ -454,6 +828,26 @@ impl MatrixActor {
             let has_timeline = self.active_timelines.borrow().contains_key(&room_id);
 
             if !has_timeline && let Ok(timeline) = room.timeline_builder().build().await {
+                let is_encrypted = room.encryption_state().is_encrypted();
+                self.send_event(ToShell::RoomDetailsUpdate {
+                    room_id: room_id.clone(),
+                    details: RoomDetails {
+                        room_id: room_id.clone(),
+                        name: room.name(),
+                        topic: room.topic(),
+                        avatar_url: room.avatar_url(),
+                        members: HashMap::new(),
+                        timeline: std::collections::VecDeque::new(),
+                        typing_users: HashSet::new(),
+                        active_call: None,
+                        is_encrypted,
+                        permissions: crate::model::RoomPermissions::default(),
+                        prev_batch: None,
+                        next_batch: None,
+                        fully_read_marker: None,
+                    },
+                });
+
                 let (items, mut stream) = timeline.subscribe().await;
 
                 let initial_views: Vec<TimelineItem> = items
@@ -688,13 +1082,19 @@ fn map_timeline_diff(diff: VectorDiff<Arc<matrix_sdk_ui::timeline::TimelineItem>
 }
 
 #[allow(clippy::future_not_send)]
-async fn room_list_item_to_view(item: RoomListItem) -> RoomListEntryView {
+async fn room_list_item_to_view(client: Client, item: RoomListItem) -> RoomListEntryView {
     let unread = item.unread_notification_counts();
 
     let last_activity = item
         .latest_event()
         .and_then(|e| e.event().timestamp())
         .unwrap_or_else(|| MilliSecondsSinceUnixEpoch(0u32.into()));
+
+    let is_encrypted = if let Some(room) = client.get_room(item.room_id()) {
+        room.encryption_state().is_encrypted()
+    } else {
+        false
+    };
 
     let summary = RoomSummary {
         room_id: item.room_id().to_owned(),
@@ -708,6 +1108,7 @@ async fn room_list_item_to_view(item: RoomListItem) -> RoomListEntryView {
         last_activity,
         has_active_call: false,
         active_call_participant_count: 0,
+        is_encrypted,
         tags: HashSet::new(),
     };
 
@@ -715,34 +1116,42 @@ async fn room_list_item_to_view(item: RoomListItem) -> RoomListEntryView {
 }
 
 #[allow(clippy::future_not_send)]
-async fn map_room_list_diff(diff: VectorDiff<RoomListItem>) -> RoomListEntryDiff {
+async fn map_room_list_diff(client: Client, diff: VectorDiff<RoomListItem>) -> RoomListEntryDiff {
     match diff {
         VectorDiff::Append { values } => RoomListEntryDiff::Append {
-            entries: futures::future::join_all(values.into_iter().map(room_list_item_to_view))
-                .await,
+            entries: futures::future::join_all(
+                values
+                    .into_iter()
+                    .map(|v| room_list_item_to_view(client.clone(), v)),
+            )
+            .await,
         },
         VectorDiff::Clear => RoomListEntryDiff::Clear,
         VectorDiff::PushFront { value } => RoomListEntryDiff::PushFront {
-            entry: room_list_item_to_view(value).await,
+            entry: room_list_item_to_view(client, value).await,
         },
         VectorDiff::PushBack { value } => RoomListEntryDiff::PushBack {
-            entry: room_list_item_to_view(value).await,
+            entry: room_list_item_to_view(client, value).await,
         },
         VectorDiff::PopFront => RoomListEntryDiff::PopFront,
         VectorDiff::PopBack => RoomListEntryDiff::PopBack,
         VectorDiff::Insert { index, value } => RoomListEntryDiff::Insert {
             index,
-            entry: room_list_item_to_view(value).await,
+            entry: room_list_item_to_view(client, value).await,
         },
         VectorDiff::Set { index, value } => RoomListEntryDiff::Set {
             index,
-            entry: room_list_item_to_view(value).await,
+            entry: room_list_item_to_view(client, value).await,
         },
         VectorDiff::Remove { index } => RoomListEntryDiff::Remove { index },
         VectorDiff::Truncate { length } => RoomListEntryDiff::Truncate { length },
         VectorDiff::Reset { values } => RoomListEntryDiff::Reset {
-            entries: futures::future::join_all(values.into_iter().map(room_list_item_to_view))
-                .await,
+            entries: futures::future::join_all(
+                values
+                    .into_iter()
+                    .map(|v| room_list_item_to_view(client.clone(), v)),
+            )
+            .await,
         },
     }
 }

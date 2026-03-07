@@ -137,6 +137,7 @@ pub struct RoomSummary {
     pub unread_count: u64,
     pub highlight_count: u64,
 
+    pub is_encrypted: bool,
     pub tags: HashSet<String>,
 }
 
@@ -150,6 +151,8 @@ pub struct RoomDetails {
     pub timeline: VecDeque<TimelineItem>,
     pub typing_users: HashSet<OwnedUserId>,
     pub active_call: Option<ActiveCallState>,
+
+    pub is_encrypted: bool,
 
     pub permissions: RoomPermissions,
     pub prev_batch: Option<String>,
@@ -330,6 +333,8 @@ pub struct MemberProfile {
     pub avatar_url: Option<OwnedMxcUri>,
     pub membership: MembershipState,
     pub presence: PresenceState,
+
+    pub is_verified: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
