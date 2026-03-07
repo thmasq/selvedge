@@ -107,6 +107,12 @@ pub enum ToActor {
         request_id: String,
         passphrase: String,
     },
+    SubmitUiaResponse {
+        request_id: String,
+        session: String,
+        password: String,
+        passphrase: String,
+    },
     RecoverIdentity {
         request_id: String,
         passphrase: String,
@@ -123,6 +129,15 @@ pub enum ToActor {
         request_id: String,
         room_id: OwnedRoomId,
         session_id: String,
+    },
+    ExportKeys {
+        request_id: String,
+        passphrase: String,
+    },
+    ImportKeys {
+        request_id: String,
+        passphrase: String,
+        payload: Vec<u8>,
     },
 }
 
@@ -145,10 +160,18 @@ pub enum ToShell {
         success: bool,
         error: Option<ActorError>,
     },
+    UiaaPrompt {
+        request_id: String,
+        session: String,
+    },
     VerificationUpdate {
         user_id: OwnedUserId,
         flow_id: String,
         state: VerificationState,
+    },
+    KeysExported {
+        request_id: String,
+        payload: String,
     },
 }
 
@@ -570,6 +593,84 @@ impl MatrixActor {
                             success: true,
                             error: None,
                         },
+                        Err(e) => {
+                            if let matrix_sdk::encryption::recovery::RecoveryError::Sdk(sdk_err) =
+                                &e
+                            {
+                                if let Some(uiaa_info) = sdk_err.as_uiaa_response() {
+                                    if let Some(session) = &uiaa_info.session {
+                                        return vec![ToShell::UiaaPrompt {
+                                            request_id,
+                                            session: session.clone(),
+                                        }];
+                                    }
+                                }
+                            }
+
+                            ToShell::CommandResult {
+                                request_id,
+                                success: false,
+                                error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                            }
+                        }
+                    }
+                } else {
+                    ToShell::CommandResult {
+                        request_id,
+                        success: false,
+                        error: Some(ActorError::ClientNotInitialized),
+                    }
+                };
+                vec![response]
+            }
+            ToActor::SubmitUiaResponse {
+                request_id,
+                session,
+                password,
+                passphrase,
+            } => {
+                let client = self.client.borrow().clone();
+                let response = if let Some(client) = client {
+                    let identifier =
+                        matrix_sdk::ruma::api::client::uiaa::UserIdentifier::UserIdOrLocalpart(
+                            client
+                                .user_id()
+                                .map(|id| id.to_string())
+                                .unwrap_or_default(),
+                        );
+
+                    let mut uiaa_password =
+                        matrix_sdk::ruma::api::client::uiaa::Password::new(identifier, password);
+                    uiaa_password.session = Some(session);
+
+                    let auth_data =
+                        matrix_sdk::ruma::api::client::uiaa::AuthData::Password(uiaa_password);
+
+                    match client
+                        .encryption()
+                        .bootstrap_cross_signing(Some(auth_data))
+                        .await
+                    {
+                        Ok(_) => {
+                            match client
+                                .encryption()
+                                .recovery()
+                                .enable()
+                                .with_passphrase(&passphrase)
+                                .await
+                            {
+                                Ok(_) => ToShell::CommandResult {
+                                    request_id,
+                                    success: true,
+                                    error: None,
+                                },
+                                Err(e) => ToShell::CommandResult {
+                                    request_id,
+                                    success: false,
+                                    error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                                },
+                            }
+                        }
                         Err(e) => ToShell::CommandResult {
                             request_id,
                             success: false,
@@ -668,11 +769,15 @@ impl MatrixActor {
             }
             ToActor::RetryDecryption {
                 request_id,
-                room_id: _,
-                session_id: _,
+                room_id,
+                session_id,
             } => {
-                let client = self.client.borrow().clone();
-                let response = if client.is_some() {
+                let timeline = self.active_timelines.borrow().get(&room_id).cloned();
+                let response = if let Some(timeline) = timeline {
+                    timeline
+                        .retry_decryption(std::iter::once(session_id.as_str()))
+                        .await;
+
                     ToShell::CommandResult {
                         request_id,
                         success: true,
@@ -682,8 +787,37 @@ impl MatrixActor {
                     ToShell::CommandResult {
                         request_id,
                         success: false,
-                        error: Some(ActorError::ClientNotInitialized),
+                        error: Some(ActorError::RoomOperationFailed(
+                            "Timeline not found for the given room".into(),
+                        )),
                     }
+                };
+                vec![response]
+            }
+            ToActor::ExportKeys {
+                request_id,
+                passphrase: _,
+            } => {
+                let response = ToShell::CommandResult {
+                    request_id,
+                    success: false,
+                    error: Some(ActorError::RoomOperationFailed(
+                        "Manual file export is not supported in the web environment. Please use Account Recovery / Key Backup instead.".into(),
+                    )),
+                };
+                vec![response]
+            }
+            ToActor::ImportKeys {
+                request_id,
+                passphrase: _,
+                payload: _,
+            } => {
+                let response = ToShell::CommandResult {
+                    request_id,
+                    success: false,
+                    error: Some(ActorError::RoomOperationFailed(
+                        "Manual file import is not supported in the web environment. Please use Account Recovery / Key Backup instead.".into(),
+                    )),
                 };
                 vec![response]
             }
@@ -829,6 +963,38 @@ impl MatrixActor {
 
             if !has_timeline && let Ok(timeline) = room.timeline_builder().build().await {
                 let is_encrypted = room.encryption_state().is_encrypted();
+
+                let mut members_map = HashMap::new();
+                if let Ok(members) = room.members(matrix_sdk::RoomMemberships::ACTIVE).await {
+                    for member in members {
+                        let user_id = member.user_id().to_owned();
+
+                        let is_verified = if is_encrypted {
+                            client
+                                .encryption()
+                                .get_user_identity(&user_id)
+                                .await
+                                .ok()
+                                .flatten()
+                                .is_some_and(|identity| identity.is_verified())
+                        } else {
+                            false
+                        };
+
+                        members_map.insert(
+                            user_id.clone(),
+                            crate::model::MemberProfile {
+                                user_id,
+                                display_name: member.display_name().map(ToOwned::to_owned),
+                                avatar_url: member.avatar_url().map(ToOwned::to_owned),
+                                membership: member.membership().clone(),
+                                presence: crate::model::PresenceState::Unknown,
+                                is_verified,
+                            },
+                        );
+                    }
+                }
+
                 self.send_event(ToShell::RoomDetailsUpdate {
                     room_id: room_id.clone(),
                     details: RoomDetails {
@@ -836,7 +1002,7 @@ impl MatrixActor {
                         name: room.name(),
                         topic: room.topic(),
                         avatar_url: room.avatar_url(),
-                        members: HashMap::new(),
+                        members: members_map,
                         timeline: std::collections::VecDeque::new(),
                         typing_users: HashSet::new(),
                         active_call: None,
@@ -985,13 +1151,39 @@ impl MatrixActor {
 fn map_timeline_item_safe(item: &matrix_sdk_ui::timeline::TimelineItem) -> TimelineItem {
     match item.kind() {
         matrix_sdk_ui::timeline::TimelineItemKind::Event(event) => {
-            let content = event.content().as_message().map_or_else(
-                || TimelineContent::Unsupported,
-                |msg| {
-                    let ruma_content = RoomMessageEventContent::new(msg.msgtype().clone());
-                    ruma_content.into()
-                },
-            );
+            let mut content = match event.content() {
+                matrix_sdk_ui::timeline::TimelineItemContent::MsgLike(msg) => {
+                    if let Some(msg_content) = msg.as_message() {
+                        let ruma_content =
+                            RoomMessageEventContent::new(msg_content.msgtype().clone());
+                        ruma_content.into()
+                    } else {
+                        TimelineContent::Unsupported
+                    }
+                }
+                _ => TimelineContent::Unsupported,
+            };
+
+            if matches!(content, TimelineContent::Unsupported) {
+                if let Some(raw_json) = event.latest_json() {
+                    if let Ok(Some(event_type)) = raw_json.get_field::<String>("type") {
+                        if event_type == "m.room.encrypted" {
+                            let session_id = raw_json
+                                .get_field::<serde_json::Value>("content")
+                                .ok()
+                                .flatten()
+                                .and_then(|c| {
+                                    c.get("session_id")
+                                        .and_then(|s| s.as_str())
+                                        .map(ToString::to_string)
+                                })
+                                .unwrap_or_default();
+
+                            content = TimelineContent::Undecryptable { session_id };
+                        }
+                    }
+                }
+            }
 
             let delivery_status = event
                 .send_state()

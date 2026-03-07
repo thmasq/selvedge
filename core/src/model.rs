@@ -209,6 +209,7 @@ pub enum TimelineContent {
     Redaction { reason: Option<String> },
     Unsupported,
     Redacted,
+    Undecryptable { session_id: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
