@@ -481,30 +481,57 @@ impl MatrixActor {
             }
             ToActor::AcceptVerification {
                 request_id,
-                user_id: _,
+                user_id,
                 flow_id,
             } => {
-                let verification = self.active_verifications.borrow().get(&flow_id).cloned();
-                let response = if let Some(sas) = verification {
-                    match sas.accept().await {
-                        Ok(_) => ToShell::CommandResult {
-                            request_id,
-                            success: true,
-                            error: None,
-                        },
-                        Err(e) => ToShell::CommandResult {
+                let client = self.client.borrow().clone();
+                let response = if let Some(client) = client {
+                    if let Some(request) = client
+                        .encryption()
+                        .get_verification_request(&user_id, &flow_id)
+                        .await
+                    {
+                        match request.accept().await {
+                            Ok(_) => ToShell::CommandResult {
+                                request_id,
+                                success: true,
+                                error: None,
+                            },
+                            Err(e) => ToShell::CommandResult {
+                                request_id,
+                                success: false,
+                                error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                            },
+                        }
+                    } else if let Some(sas) =
+                        self.active_verifications.borrow().get(&flow_id).cloned()
+                    {
+                        match sas.accept().await {
+                            Ok(_) => ToShell::CommandResult {
+                                request_id,
+                                success: true,
+                                error: None,
+                            },
+                            Err(e) => ToShell::CommandResult {
+                                request_id,
+                                success: false,
+                                error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                            },
+                        }
+                    } else {
+                        ToShell::CommandResult {
                             request_id,
                             success: false,
-                            error: Some(ActorError::RoomOperationFailed(e.to_string())),
-                        },
+                            error: Some(ActorError::RoomOperationFailed(
+                                "Verification flow not found".into(),
+                            )),
+                        }
                     }
                 } else {
                     ToShell::CommandResult {
                         request_id,
                         success: false,
-                        error: Some(ActorError::RoomOperationFailed(
-                            "Verification flow not found".into(),
-                        )),
+                        error: Some(ActorError::ClientNotInitialized),
                     }
                 };
                 vec![response]
@@ -881,18 +908,21 @@ impl MatrixActor {
                     async move {
                         let user_id = ev.sender.clone();
                         let flow_id = ev.content.transaction_id.to_string();
-                        if let Some(matrix_sdk::encryption::verification::Verification::SasV1(
-                            _sas,
-                        )) = _client
+
+                        if let Some(request) = _client
                             .encryption()
-                            .get_verification(&user_id, &flow_id)
+                            .get_verification_request(&user_id, &flow_id)
                             .await
                         {
+                            if request.is_cancelled() || request.is_done() {
+                                return;
+                            }
+
                             let _ = sender_for_async.unbounded_send(ToShell::VerificationUpdate {
                                 user_id,
                                 flow_id,
                                 state: crate::model::VerificationState::Requested {
-                                    methods: ev.content.methods,
+                                    methods: ev.content.methods.clone(),
                                 },
                             });
                         }
@@ -964,19 +994,48 @@ impl MatrixActor {
             if !has_timeline && let Ok(timeline) = room.timeline_builder().build().await {
                 let is_encrypted = room.encryption_state().is_encrypted();
 
+                let mut trust_level = if is_encrypted {
+                    crate::model::RoomTrustLevel::Trusted
+                } else {
+                    crate::model::RoomTrustLevel::Plain
+                };
+
                 let mut members_map = HashMap::new();
                 if let Ok(members) = room.members(matrix_sdk::RoomMemberships::ACTIVE).await {
                     for member in members {
                         let user_id = member.user_id().to_owned();
 
                         let is_verified = if is_encrypted {
-                            client
+                            let is_user_verified = client
                                 .encryption()
                                 .get_user_identity(&user_id)
                                 .await
                                 .ok()
                                 .flatten()
-                                .is_some_and(|identity| identity.is_verified())
+                                .is_some_and(|identity| identity.is_verified());
+
+                            if !is_user_verified {
+                                // TODO: Add local storage check for "Identity Changed" alert here.
+
+                                if trust_level == crate::model::RoomTrustLevel::Trusted {
+                                    trust_level = crate::model::RoomTrustLevel::Normal;
+                                }
+                            } else {
+                                // TODO: Mark user as verified in local storage here to support the check above in the future.
+
+                                if let Ok(devices) =
+                                    client.encryption().get_user_devices(&user_id).await
+                                {
+                                    for device in devices.devices() {
+                                        if !device.is_cross_signed_by_owner() {
+                                            trust_level = crate::model::RoomTrustLevel::Warning;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+
+                            is_user_verified
                         } else {
                             false
                         };
@@ -1007,6 +1066,7 @@ impl MatrixActor {
                         typing_users: HashSet::new(),
                         active_call: None,
                         is_encrypted,
+                        trust_level,
                         permissions: crate::model::RoomPermissions::default(),
                         prev_batch: None,
                         next_batch: None,

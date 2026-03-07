@@ -51,6 +51,14 @@ pub enum ActorError {
     ClientNotInitialized,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RoomTrustLevel {
+    Plain,   // The room is not encrypted
+    Normal,  // Encrypted (Black Shield) - Some users/devices in the room are unverified
+    Trusted, // Encrypted (Green Shield) - Every user AND their devices are verified
+    Warning, // Encrypted (Red Shield) - A previously verified user/device is no longer verified
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActiveCallState {
     pub call_id: String,
@@ -153,6 +161,7 @@ pub struct RoomDetails {
     pub active_call: Option<ActiveCallState>,
 
     pub is_encrypted: bool,
+    pub trust_level: RoomTrustLevel,
 
     pub permissions: RoomPermissions,
     pub prev_batch: Option<String>,
