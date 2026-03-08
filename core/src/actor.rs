@@ -7,6 +7,10 @@ use futures::{StreamExt, channel::mpsc};
 use gloo_worker::HandlerId;
 use gloo_worker::{Worker, WorkerScope};
 use indexmap::IndexMap;
+use matrix_sdk::ruma::api::client::filter::RoomEventFilter;
+use matrix_sdk::ruma::api::client::search::search_events::v3::{
+    Categories, Criteria, Request as SearchRequest,
+};
 use matrix_sdk::ruma::api::client::to_device::send_event_to_device::v3::Request as ToDeviceRequest;
 use matrix_sdk::ruma::events::AnyToDeviceEventContent;
 use matrix_sdk::ruma::events::room_key_request::{
@@ -170,6 +174,12 @@ pub enum ToActor {
         session_id: String,
         sender_key: String,
     },
+    SearchMessages {
+        request_id: String,
+        room_id: Option<OwnedRoomId>,
+        query: String,
+        limit: usize,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -211,6 +221,10 @@ pub enum ToShell {
     DeviceListResult {
         request_id: String,
         devices: Vec<DeviceInfo>,
+    },
+    SearchResults {
+        request_id: String,
+        results: Vec<EventItem>,
     },
 }
 
@@ -267,6 +281,7 @@ struct MatrixActor {
     active_timelines: RefCell<HashMap<OwnedRoomId, Rc<Timeline>>>,
     active_sas_verifications: RefCell<HashMap<String, SasVerification>>,
     active_qr_verifications: RefCell<HashMap<String, QrVerification>>,
+    search_index: Rc<RefCell<SearchIndex>>,
 }
 
 impl MatrixActor {
@@ -277,6 +292,7 @@ impl MatrixActor {
             active_timelines: RefCell::new(HashMap::new()),
             active_sas_verifications: RefCell::new(HashMap::new()),
             active_qr_verifications: RefCell::new(HashMap::new()),
+            search_index: Rc::new(RefCell::new(SearchIndex::default())),
         }
     }
 
@@ -1265,6 +1281,97 @@ impl MatrixActor {
 
                 vec![response]
             }
+            ToActor::SearchMessages {
+                request_id,
+                room_id,
+                query,
+                limit,
+            } => {
+                let client_opt = self.client.borrow().clone();
+                let search_index = self.search_index.clone();
+
+                let mut server_results: Option<Vec<crate::model::EventItem>> = None;
+
+                if let (Some(client), Some(r_id)) = (&client_opt, &room_id) {
+                    if let Some(room) = client.get_room(r_id) {
+                        let is_encrypted = room.encryption_state().is_encrypted();
+
+                        if !is_encrypted {
+                            let mut filter = RoomEventFilter::default();
+                            filter.rooms = Some(vec![r_id.clone()]);
+                            filter.limit = Some(limit.try_into().unwrap_or(20_u32).into());
+
+                            let mut criteria = Criteria::new(query.clone());
+                            criteria.filter = filter;
+
+                            let mut categories = Categories::new();
+                            categories.room_events = Some(criteria);
+
+                            let request = SearchRequest::new(categories);
+
+                            if let Ok(response) = client.send(request).await {
+                                let mut items = Vec::new();
+
+                                for result in response.search_categories.room_events.results {
+                                    if let Some(raw_event) = result.result {
+                                        if let Ok(Some(event_id)) = raw_event
+                                            .get_field::<matrix_sdk::ruma::OwnedEventId>(
+                                            "event_id",
+                                        ) {
+                                            if let Ok(Some(sender)) = raw_event
+                                                .get_field::<matrix_sdk::ruma::OwnedUserId>(
+                                                "sender",
+                                            ) {
+                                                let timestamp = raw_event
+                                                    .get_field::<matrix_sdk::ruma::MilliSecondsSinceUnixEpoch>("origin_server_ts")
+                                                    .ok()
+                                                    .flatten()
+                                                    .unwrap_or_else(|| matrix_sdk::ruma::MilliSecondsSinceUnixEpoch(0u32.into()));
+
+                                                items.push(crate::model::EventItem {
+                                                    event_id,
+                                                    sender,
+                                                    sender_profile: None,
+                                                    timestamp,
+                                                    content: Box::new(
+                                                        crate::model::TimelineContent::Unsupported,
+                                                    ),
+                                                    reactions: indexmap::IndexMap::new(),
+                                                    read_receipts: Vec::new(),
+                                                    delivery_status:
+                                                        crate::model::DeliveryStatus::Synced,
+                                                    in_reply_to: None,
+                                                    reply_details: None,
+                                                    is_edited: false,
+                                                    latest_edit: None,
+                                                    thread_root_id: None,
+                                                    is_highlight: false,
+                                                    should_group: false,
+                                                    encryption_status:
+                                                        crate::model::EncryptionStatus::Unencrypted,
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+
+                                server_results = Some(items);
+                            }
+                        }
+                    }
+                }
+
+                let results = server_results.unwrap_or_else(|| {
+                    search_index
+                        .borrow()
+                        .search(room_id.as_ref(), &query, limit)
+                });
+
+                vec![ToShell::SearchResults {
+                    request_id,
+                    results,
+                }]
+            }
         }
     }
 
@@ -1495,7 +1602,11 @@ impl MatrixActor {
 
                 let initial_views: Vec<TimelineItem> = items
                     .into_iter()
-                    .map(|i| map_timeline_item_safe(&i))
+                    .map(|i| {
+                        let mapped = map_timeline_item_safe(&i);
+                        self.search_index.borrow_mut().index_item(&room_id, &mapped);
+                        mapped
+                    })
                     .collect();
 
                 self.send_event(ToShell::TimelineDiff {
@@ -1511,11 +1622,37 @@ impl MatrixActor {
 
                 let sender = self.event_sender.clone();
                 let stream_room_id = room_id.clone();
+                let search_index = self.search_index.clone();
 
                 spawn_local(async move {
                     while let Some(diffs) = stream.next().await {
-                        let mapped_diffs: Vec<TimelineDiff> =
-                            diffs.into_iter().map(map_timeline_diff).collect();
+                        let mapped_diffs: Vec<TimelineDiff> = diffs
+                            .into_iter()
+                            .map(|diff| {
+                                let mapped_diff = map_timeline_diff(diff);
+
+                                match &mapped_diff {
+                                    TimelineDiff::Append { entries }
+                                    | TimelineDiff::Reset { entries } => {
+                                        let mut idx = search_index.borrow_mut();
+                                        for entry in entries {
+                                            idx.index_item(&stream_room_id, entry);
+                                        }
+                                    }
+                                    TimelineDiff::PushFront { entry }
+                                    | TimelineDiff::PushBack { entry }
+                                    | TimelineDiff::Insert { entry, .. }
+                                    | TimelineDiff::Set { entry, .. } => {
+                                        search_index
+                                            .borrow_mut()
+                                            .index_item(&stream_room_id, entry);
+                                    }
+                                    _ => {}
+                                }
+
+                                mapped_diff
+                            })
+                            .collect();
 
                         let _ = sender.unbounded_send(ToShell::TimelineDiff {
                             room_id: stream_room_id.clone(),
@@ -1833,5 +1970,85 @@ async fn map_room_list_diff(client: Client, diff: VectorDiff<RoomListItem>) -> R
             )
             .await,
         },
+    }
+}
+
+#[derive(Default)]
+struct SearchIndex {
+    word_to_events: HashMap<String, HashSet<OwnedEventId>>,
+    event_store: HashMap<OwnedEventId, (OwnedRoomId, EventItem)>,
+}
+
+impl SearchIndex {
+    fn index_item(&mut self, room_id: &OwnedRoomId, item: &TimelineItem) {
+        if let TimelineItem::Event(event_item) = item {
+            if let crate::model::TimelineContent::Message(crate::model::MessageContent::Text {
+                body,
+                ..
+            }) = &*event_item.content
+            {
+                let tokens: Vec<String> = body
+                    .to_lowercase()
+                    .split_whitespace()
+                    .map(|s| s.to_string())
+                    .collect();
+
+                for token in tokens {
+                    self.word_to_events
+                        .entry(token)
+                        .or_default()
+                        .insert(event_item.event_id.clone());
+                }
+
+                self.event_store.insert(
+                    event_item.event_id.clone(),
+                    (room_id.clone(), event_item.clone()),
+                );
+            }
+        }
+    }
+
+    fn search(
+        &self,
+        room_id_filter: Option<&OwnedRoomId>,
+        query: &str,
+        limit: usize,
+    ) -> Vec<crate::model::EventItem> {
+        let tokens: Vec<String> = query
+            .to_lowercase()
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect();
+        if tokens.is_empty() {
+            return vec![];
+        }
+
+        let mut result_sets: Vec<&HashSet<OwnedEventId>> = Vec::new();
+        for token in &tokens {
+            if let Some(set) = self.word_to_events.get(token) {
+                result_sets.push(set);
+            } else {
+                return vec![];
+            }
+        }
+
+        if result_sets.is_empty() {
+            return vec![];
+        }
+
+        let mut intersection = result_sets[0].clone();
+        for set in result_sets.into_iter().skip(1) {
+            intersection.retain(|id| set.contains(id));
+        }
+
+        let mut matched_events: Vec<crate::model::EventItem> = intersection
+            .into_iter()
+            .filter_map(|id| self.event_store.get(&id))
+            .filter(|(r_id, _)| room_id_filter.map_or(true, |f| f == r_id))
+            .map(|(_, item)| item.clone())
+            .collect();
+
+        matched_events.sort_by_key(|e| std::cmp::Reverse(e.timestamp));
+        matched_events.into_iter().take(limit).collect()
     }
 }
