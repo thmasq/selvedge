@@ -3,7 +3,7 @@
 mod actor;
 mod model;
 
-pub use actor::{MatrixWorker, ToActor, ToShell};
+pub use actor::MatrixWorker;
 pub use model::{
     ActiveCallState, CallParticipant, CallType, DeliveryStatus, EventItem, MemberProfile,
     RoomDetails, RoomSummary, TimelineContent, TimelineItem, VirtualItem,
