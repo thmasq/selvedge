@@ -4,7 +4,6 @@ pub mod message;
 pub mod search;
 pub mod worker;
 
-// Re-export the worker so the rest of the crate can use it seamlessly
 pub use worker::MatrixWorker;
 
 use futures::channel::mpsc;
@@ -217,6 +216,11 @@ impl MatrixActor {
                 self.request_room_key(request_id, room_id, session_id, sender_key)
                     .await
             }
+            ToActor::ClearRoomWarning {
+                request_id,
+                room_id,
+                user_id,
+            } => self.clear_room_warning(request_id, room_id, user_id).await,
         }
     }
 }

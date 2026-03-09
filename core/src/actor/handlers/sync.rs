@@ -5,7 +5,9 @@ use crate::model::{ActorError, VerificationState};
 use futures::StreamExt;
 use matrix_sdk::Client;
 use matrix_sdk::ruma::events::ToDeviceEvent;
+use matrix_sdk::ruma::events::key::verification::done::ToDeviceKeyVerificationDoneEventContent;
 use matrix_sdk::ruma::events::key::verification::request::ToDeviceKeyVerificationRequestEventContent;
+use matrix_sdk::ruma::events::room_key_request::{Action, ToDeviceRoomKeyRequestEventContent};
 use matrix_sdk_ui::room_list_service::{RoomListService, filters::new_filter_all};
 use std::rc::Rc;
 use wasm_bindgen_futures::spawn_local;
@@ -15,7 +17,10 @@ impl MatrixActor {
         let client = self.client.borrow().clone();
         if let Some(client) = client {
             let sender = self.event_sender.clone();
+
             let verification_sender = sender.clone();
+            let verification_done_sender = sender.clone();
+            let room_key_request_sender = sender.clone();
 
             client.add_event_handler(
                 move |ev: ToDeviceEvent<ToDeviceKeyVerificationRequestEventContent>,
@@ -41,6 +46,37 @@ impl MatrixActor {
                                     methods: ev.content.methods.clone(),
                                 },
                             });
+                        }
+                    }
+                },
+            );
+
+            client.add_event_handler(
+                move |ev: ToDeviceEvent<ToDeviceKeyVerificationDoneEventContent>,
+                      _client: Client| {
+                    let sender_for_async = verification_done_sender.clone();
+                    async move {
+                        let _ = sender_for_async.unbounded_send(ToShell::IdentityUpdated {
+                            user_id: ev.sender.clone(),
+                        });
+                    }
+                },
+            );
+
+            client.add_event_handler(
+                move |ev: ToDeviceEvent<ToDeviceRoomKeyRequestEventContent>, _client: Client| {
+                    let sender_for_async = room_key_request_sender.clone();
+                    async move {
+                        if matches!(ev.content.action, Action::Request) {
+                            let _ =
+                                sender_for_async.unbounded_send(ToShell::RoomKeyRequestReceived {
+                                    request_id: ev.content.request_id.to_string(),
+                                    requester_user_id: ev.sender.clone(),
+                                    requester_device_id: ev
+                                        .content
+                                        .requesting_device_id
+                                        .to_string(),
+                                });
                         }
                     }
                 },

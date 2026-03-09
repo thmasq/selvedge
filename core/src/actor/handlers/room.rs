@@ -3,6 +3,7 @@ use super::super::mapping::{map_timeline_diff, map_timeline_item_safe};
 use super::super::message::ToShell;
 use crate::model::{ActorError, RoomDetails, TimelineDiff, TimelineItem};
 use futures::StreamExt;
+use gloo_storage::{LocalStorage, Storage};
 use matrix_sdk::ruma::events::AnyInitialStateEvent;
 use matrix_sdk::ruma::events::room::encryption::RoomEncryptionEventContent;
 use matrix_sdk::ruma::serde::Raw;
@@ -44,8 +45,13 @@ impl MatrixActor {
                                 .flatten()
                                 .is_some_and(|identity| identity.is_verified());
 
+                            let storage_key = format!("trust_state_{}", user_id);
+                            let prev_verified: Option<bool> = LocalStorage::get(&storage_key).ok();
+
                             if !is_user_verified {
-                                if trust_level == crate::model::RoomTrustLevel::Trusted {
+                                if prev_verified == Some(true) {
+                                    trust_level = crate::model::RoomTrustLevel::Warning;
+                                } else if trust_level == crate::model::RoomTrustLevel::Trusted {
                                     trust_level = crate::model::RoomTrustLevel::Normal;
                                 }
                             } else if let Ok(devices) =
@@ -58,6 +64,8 @@ impl MatrixActor {
                                     }
                                 }
                             }
+
+                            let _ = LocalStorage::set(&storage_key, is_user_verified);
 
                             is_user_verified
                         } else {

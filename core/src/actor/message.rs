@@ -143,6 +143,11 @@ pub enum ToActor {
         query: String,
         limit: usize,
     },
+    ClearRoomWarning {
+        request_id: String,
+        room_id: OwnedRoomId,
+        user_id: OwnedUserId,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -188,5 +193,17 @@ pub enum ToShell {
     SearchResults {
         request_id: String,
         results: Vec<EventItem>,
+    },
+    IdentityUpdated {
+        user_id: OwnedUserId,
+    },
+    RoomKeyRequestReceived {
+        request_id: String,
+        requester_user_id: OwnedUserId,
+        requester_device_id: String,
+    },
+    RoomTrustLevelUpdated {
+        room_id: OwnedRoomId,
+        trust_level: crate::model::RoomTrustLevel,
     },
 }

@@ -1,6 +1,7 @@
 use super::super::MatrixActor;
 use super::super::message::ToShell;
-use crate::model::{ActorError, DeviceInfo};
+use crate::model::{ActorError, DeviceInfo, RoomTrustLevel};
+use gloo_storage::{LocalStorage, Storage};
 use matrix_sdk::ruma::api::client::to_device::send_event_to_device::v3::Request as ToDeviceRequest;
 use matrix_sdk::ruma::events::AnyToDeviceEventContent;
 use matrix_sdk::ruma::events::room_key_request::{
@@ -772,5 +773,82 @@ impl MatrixActor {
                 error: Some(ActorError::ClientNotInitialized),
             }]
         }
+    }
+    #[allow(clippy::future_not_send)]
+    pub(crate) async fn clear_room_warning(
+        &self,
+        request_id: String,
+        room_id: OwnedRoomId,
+        user_id: OwnedUserId,
+    ) -> Vec<ToShell> {
+        let storage_key = format!("trust_state_{}", user_id);
+        let _ = LocalStorage::set(&storage_key, false);
+
+        let mut responses = vec![ToShell::CommandResult {
+            request_id,
+            success: true,
+            error: None,
+        }];
+
+        let client = self.client.borrow().clone();
+        if let Some(client) = client {
+            if let Some(room) = client.get_room(&room_id) {
+                let is_encrypted = room.encryption_state().is_encrypted();
+
+                let mut trust_level = if is_encrypted {
+                    RoomTrustLevel::Trusted
+                } else {
+                    RoomTrustLevel::Plain
+                };
+
+                if is_encrypted {
+                    if let Ok(members) = room.members(matrix_sdk::RoomMemberships::ACTIVE).await {
+                        for member in members {
+                            let m_user_id = member.user_id().to_owned();
+
+                            let is_user_verified = client
+                                .encryption()
+                                .get_user_identity(&m_user_id)
+                                .await
+                                .ok()
+                                .flatten()
+                                .is_some_and(|identity| identity.is_verified());
+
+                            let m_storage_key = format!("trust_state_{}", m_user_id);
+                            let prev_verified: Option<bool> =
+                                LocalStorage::get(&m_storage_key).ok();
+
+                            if !is_user_verified {
+                                if prev_verified == Some(true) {
+                                    trust_level = RoomTrustLevel::Warning;
+                                } else if trust_level == RoomTrustLevel::Trusted {
+                                    trust_level = RoomTrustLevel::Normal;
+                                }
+                            } else if let Ok(devices) =
+                                client.encryption().get_user_devices(&m_user_id).await
+                            {
+                                for device in devices.devices() {
+                                    if !device.is_cross_signed_by_owner() {
+                                        trust_level = RoomTrustLevel::Warning;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if is_user_verified && prev_verified != Some(true) {
+                                let _ = LocalStorage::set(&m_storage_key, true);
+                            }
+                        }
+                    }
+                }
+
+                responses.push(ToShell::RoomTrustLevelUpdated {
+                    room_id,
+                    trust_level,
+                });
+            }
+        }
+
+        responses
     }
 }
