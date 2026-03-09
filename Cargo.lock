@@ -3847,8 +3847,11 @@ dependencies = [
 name = "selvedge-shared"
 version = "0.1.0"
 dependencies = [
+ "indexmap",
+ "matrix-sdk",
  "ruma",
  "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

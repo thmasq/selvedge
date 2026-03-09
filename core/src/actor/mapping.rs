@@ -1,7 +1,3 @@
-use crate::model::{
-    DeliveryStatus, EventItem, ModelError, RoomListEntryDiff, RoomListEntryView, RoomSummary,
-    TimelineContent, TimelineDiff, TimelineItem,
-};
 use eyeball_im::VectorDiff;
 use indexmap::IndexMap;
 use matrix_sdk::Client;
@@ -9,6 +5,10 @@ use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
 use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedTransactionId};
 use matrix_sdk_ui::room_list_service::RoomListItem;
 use matrix_sdk_ui::timeline::{EventSendState, VirtualTimelineItem};
+use selvedge_shared::{
+    DeliveryStatus, EncryptionStatus, EventItem, ModelError, RoomListEntryDiff, RoomListEntryView,
+    RoomSummary, TimelineContent, TimelineDiff, TimelineItem, VirtualItem,
+};
 use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -99,16 +99,16 @@ pub(crate) fn map_timeline_item_safe(item: &matrix_sdk_ui::timeline::TimelineIte
                 thread_root_id: None,
                 is_highlight: event.is_highlighted(),
                 should_group: false,
-                encryption_status: crate::model::EncryptionStatus::Unencrypted,
+                encryption_status: EncryptionStatus::Unencrypted,
             })
         }
         matrix_sdk_ui::timeline::TimelineItemKind::Virtual(virt) => match virt {
             VirtualTimelineItem::DateDivider(ts) => {
-                TimelineItem::Virtual(crate::model::VirtualItem::DayDivider {
+                TimelineItem::Virtual(VirtualItem::DayDivider {
                     ts: MilliSecondsSinceUnixEpoch(ts.0),
                 })
             }
-            _ => TimelineItem::Virtual(crate::model::VirtualItem::LoadingIndicator),
+            _ => TimelineItem::Virtual(VirtualItem::LoadingIndicator),
         },
     }
 }

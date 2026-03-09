@@ -1,5 +1,5 @@
-use crate::model::{EventItem, TimelineItem};
 use matrix_sdk::ruma::{OwnedEventId, OwnedRoomId};
+use selvedge_shared::{EventItem, MessageContent, TimelineContent, TimelineItem};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Default)]
@@ -11,10 +11,8 @@ pub(crate) struct SearchIndex {
 impl SearchIndex {
     pub(crate) fn index_item(&mut self, room_id: &OwnedRoomId, item: &TimelineItem) {
         if let TimelineItem::Event(event_item) = item {
-            if let crate::model::TimelineContent::Message(crate::model::MessageContent::Text {
-                body,
-                ..
-            }) = &*event_item.content
+            if let TimelineContent::Message(MessageContent::Text { body, .. }) =
+                &*event_item.content
             {
                 let tokens: Vec<String> = body
                     .to_lowercase()
@@ -42,7 +40,7 @@ impl SearchIndex {
         room_id_filter: Option<&OwnedRoomId>,
         query: &str,
         limit: usize,
-    ) -> Vec<crate::model::EventItem> {
+    ) -> Vec<EventItem> {
         let tokens: Vec<String> = query
             .to_lowercase()
             .split_whitespace()
@@ -70,7 +68,7 @@ impl SearchIndex {
             intersection.retain(|id| set.contains(id));
         }
 
-        let mut matched_events: Vec<crate::model::EventItem> = intersection
+        let mut matched_events: Vec<EventItem> = intersection
             .into_iter()
             .filter_map(|id| self.event_store.get(&id))
             .filter(|(r_id, _)| room_id_filter.map_or(true, |f| f == r_id))

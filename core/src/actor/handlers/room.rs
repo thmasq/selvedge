@@ -1,7 +1,5 @@
 use super::super::MatrixActor;
 use super::super::mapping::{map_timeline_diff, map_timeline_item_safe};
-use super::super::message::ToShell;
-use crate::model::{ActorError, RoomDetails, TimelineDiff, TimelineItem};
 use futures::StreamExt;
 use gloo_storage::{LocalStorage, Storage};
 use matrix_sdk::ruma::events::AnyInitialStateEvent;
@@ -9,6 +7,10 @@ use matrix_sdk::ruma::events::room::encryption::RoomEncryptionEventContent;
 use matrix_sdk::ruma::serde::Raw;
 use matrix_sdk::ruma::{EventEncryptionAlgorithm, OwnedRoomId};
 use matrix_sdk_ui::timeline::RoomExt;
+use selvedge_shared::{
+    ActorError, MemberProfile, PresenceState, RoomDetails, RoomPermissions, RoomTrustLevel,
+    TimelineDiff, TimelineItem, message::ToShell,
+};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use wasm_bindgen_futures::spawn_local;
@@ -26,9 +28,9 @@ impl MatrixActor {
                 let is_encrypted = room.encryption_state().is_encrypted();
 
                 let mut trust_level = if is_encrypted {
-                    crate::model::RoomTrustLevel::Trusted
+                    RoomTrustLevel::Trusted
                 } else {
-                    crate::model::RoomTrustLevel::Plain
+                    RoomTrustLevel::Plain
                 };
 
                 let mut members_map = HashMap::new();
@@ -50,16 +52,16 @@ impl MatrixActor {
 
                             if !is_user_verified {
                                 if prev_verified == Some(true) {
-                                    trust_level = crate::model::RoomTrustLevel::Warning;
-                                } else if trust_level == crate::model::RoomTrustLevel::Trusted {
-                                    trust_level = crate::model::RoomTrustLevel::Normal;
+                                    trust_level = RoomTrustLevel::Warning;
+                                } else if trust_level == RoomTrustLevel::Trusted {
+                                    trust_level = RoomTrustLevel::Normal;
                                 }
                             } else if let Ok(devices) =
                                 client.encryption().get_user_devices(&user_id).await
                             {
                                 for device in devices.devices() {
                                     if !device.is_cross_signed_by_owner() {
-                                        trust_level = crate::model::RoomTrustLevel::Warning;
+                                        trust_level = RoomTrustLevel::Warning;
                                         break;
                                     }
                                 }
@@ -74,12 +76,12 @@ impl MatrixActor {
 
                         members_map.insert(
                             user_id.clone(),
-                            crate::model::MemberProfile {
+                            MemberProfile {
                                 user_id,
                                 display_name: member.display_name().map(ToOwned::to_owned),
                                 avatar_url: member.avatar_url().map(ToOwned::to_owned),
                                 membership: member.membership().clone(),
-                                presence: crate::model::PresenceState::Unknown,
+                                presence: PresenceState::Unknown,
                                 is_verified,
                             },
                         );
@@ -99,7 +101,7 @@ impl MatrixActor {
                         active_call: None,
                         is_encrypted,
                         trust_level,
-                        permissions: crate::model::RoomPermissions::default(),
+                        permissions: RoomPermissions::default(),
                         prev_batch: None,
                         next_batch: None,
                         fully_read_marker: None,

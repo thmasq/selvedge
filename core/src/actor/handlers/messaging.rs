@@ -1,6 +1,4 @@
 use super::super::MatrixActor;
-use super::super::message::ToShell;
-use crate::model::ActorError;
 use matrix_sdk::attachment::AttachmentConfig;
 use matrix_sdk::ruma::OwnedRoomId;
 use matrix_sdk::ruma::api::client::filter::RoomEventFilter;
@@ -8,6 +6,9 @@ use matrix_sdk::ruma::api::client::search::search_events::v3::{
     Categories, Criteria, Request as SearchRequest,
 };
 use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
+use selvedge_shared::{
+    ActorError, DeliveryStatus, EncryptionStatus, EventItem, TimelineContent, message::ToShell,
+};
 use std::str::FromStr;
 
 impl MatrixActor {
@@ -115,7 +116,7 @@ impl MatrixActor {
         let client_opt = self.client.borrow().clone();
         let search_index = self.search_index.clone();
 
-        let mut server_results: Option<Vec<crate::model::EventItem>> = None;
+        let mut server_results: Option<Vec<EventItem>> = None;
 
         if let (Some(client), Some(r_id)) = (&client_opt, &room_id) {
             if let Some(room) = client.get_room(r_id) {
@@ -157,17 +158,15 @@ impl MatrixActor {
                                                 )
                                             });
 
-                                        items.push(crate::model::EventItem {
+                                        items.push(EventItem {
                                             event_id,
                                             sender,
                                             sender_profile: None,
                                             timestamp,
-                                            content: Box::new(
-                                                crate::model::TimelineContent::Unsupported,
-                                            ),
+                                            content: Box::new(TimelineContent::Unsupported),
                                             reactions: indexmap::IndexMap::new(),
                                             read_receipts: Vec::new(),
-                                            delivery_status: crate::model::DeliveryStatus::Synced,
+                                            delivery_status: DeliveryStatus::Synced,
                                             in_reply_to: None,
                                             reply_details: None,
                                             is_edited: false,
@@ -175,8 +174,7 @@ impl MatrixActor {
                                             thread_root_id: None,
                                             is_highlight: false,
                                             should_group: false,
-                                            encryption_status:
-                                                crate::model::EncryptionStatus::Unencrypted,
+                                            encryption_status: EncryptionStatus::Unencrypted,
                                         });
                                     }
                                 }

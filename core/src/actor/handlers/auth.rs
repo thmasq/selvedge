@@ -1,7 +1,6 @@
 use super::super::MatrixActor;
-use super::super::message::ToShell;
-use crate::model::ActorError;
 use matrix_sdk::Client;
+use selvedge_shared::{ActorError, message::ToShell};
 
 impl MatrixActor {
     #[allow(clippy::future_not_send)]

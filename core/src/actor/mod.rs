@@ -1,6 +1,5 @@
 pub mod handlers;
 pub mod mapping;
-pub mod message;
 pub mod search;
 pub mod worker;
 
@@ -15,8 +14,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use message::{ToActor, ToShell};
 use search::SearchIndex;
+use selvedge_shared::message::{ToActor, ToShell};
 
 pub(crate) struct MatrixActor {
     pub(crate) client: RefCell<Option<Client>>,

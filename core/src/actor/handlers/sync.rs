@@ -1,7 +1,5 @@
 use super::super::MatrixActor;
 use super::super::mapping::map_room_list_diff;
-use super::super::message::ToShell;
-use crate::model::{ActorError, VerificationState};
 use futures::StreamExt;
 use matrix_sdk::Client;
 use matrix_sdk::ruma::events::ToDeviceEvent;
@@ -9,6 +7,7 @@ use matrix_sdk::ruma::events::key::verification::done::ToDeviceKeyVerificationDo
 use matrix_sdk::ruma::events::key::verification::request::ToDeviceKeyVerificationRequestEventContent;
 use matrix_sdk::ruma::events::room_key_request::{Action, ToDeviceRoomKeyRequestEventContent};
 use matrix_sdk_ui::room_list_service::{RoomListService, filters::new_filter_all};
+use selvedge_shared::{ActorError, VerificationState, message::ToShell};
 use std::rc::Rc;
 use wasm_bindgen_futures::spawn_local;
 

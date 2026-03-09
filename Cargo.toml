@@ -41,6 +41,6 @@ wasm-bindgen-futures = "0.4.58"
 web-sys = { version = "0.3.85", features = ["ServiceWorkerGlobalScope", "FetchEvent", "Cache", "CacheStorage", "Request", "Response"] }
 
 [profile.release]
-# opt-level = "z"
-# lto = "fat"
-# codegen-units = 1
+opt-level = "z"
+lto = "fat"
+codegen-units = 1

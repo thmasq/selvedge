@@ -1,6 +1,4 @@
 use super::super::MatrixActor;
-use super::super::message::ToShell;
-use crate::model::{ActorError, DeviceInfo, RoomTrustLevel};
 use gloo_storage::{LocalStorage, Storage};
 use matrix_sdk::ruma::api::client::to_device::send_event_to_device::v3::Request as ToDeviceRequest;
 use matrix_sdk::ruma::events::AnyToDeviceEventContent;
@@ -8,6 +6,7 @@ use matrix_sdk::ruma::events::room_key_request::{
     Action, RequestedKeyInfo, ToDeviceRoomKeyRequestEventContent,
 };
 use matrix_sdk::ruma::{EventEncryptionAlgorithm, OwnedRoomId, OwnedUserId};
+use selvedge_shared::{ActorError, DeviceInfo, RoomTrustLevel, message::ToShell};
 
 impl MatrixActor {
     #[allow(clippy::future_not_send)]
