@@ -45,4 +45,37 @@ impl MatrixActor {
             ))],
         }
     }
+    #[allow(clippy::future_not_send)]
+    pub(crate) async fn logout(&self, request_id: String) -> Vec<ToShell> {
+        let client_opt = self.client.borrow().clone();
+
+        if let Some(client) = client_opt {
+            let _ = client.encryption().backups().wait_for_steady_state().await;
+
+            match client.matrix_auth().logout().await {
+                Ok(_) => {
+                    *self.client.borrow_mut() = None;
+
+                    vec![ToShell::CommandResult {
+                        request_id,
+                        success: true,
+                        error: None,
+                    }]
+                }
+                Err(e) => {
+                    vec![ToShell::CommandResult {
+                        request_id,
+                        success: false,
+                        error: Some(ActorError::LogoutFailed(e.to_string())),
+                    }]
+                }
+            }
+        } else {
+            vec![ToShell::CommandResult {
+                request_id,
+                success: false,
+                error: Some(ActorError::ClientNotInitialized),
+            }]
+        }
+    }
 }

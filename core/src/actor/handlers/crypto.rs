@@ -205,11 +205,14 @@ impl MatrixActor {
                 .with_passphrase(&passphrase)
                 .await
             {
-                Ok(_) => vec![ToShell::CommandResult {
-                    request_id,
-                    success: true,
-                    error: None,
-                }],
+                Ok(_) => {
+                    let _ = client.encryption().backups().wait_for_steady_state().await;
+                    vec![ToShell::CommandResult {
+                        request_id,
+                        success: true,
+                        error: None,
+                    }]
+                }
                 Err(e) => {
                     if let matrix_sdk::encryption::recovery::RecoveryError::Sdk(sdk_err) = &e {
                         if let Some(uiaa_info) = sdk_err.as_uiaa_response() {
@@ -273,11 +276,14 @@ impl MatrixActor {
                     .with_passphrase(&passphrase)
                     .await
                 {
-                    Ok(_) => vec![ToShell::CommandResult {
-                        request_id,
-                        success: true,
-                        error: None,
-                    }],
+                    Ok(_) => {
+                        let _ = client.encryption().backups().wait_for_steady_state().await;
+                        vec![ToShell::CommandResult {
+                            request_id,
+                            success: true,
+                            error: None,
+                        }]
+                    }
                     Err(e) => vec![ToShell::CommandResult {
                         request_id,
                         success: false,
@@ -333,11 +339,14 @@ impl MatrixActor {
         let client = self.client.borrow().clone();
         if let Some(client) = client {
             match client.encryption().backups().create().await {
-                Ok(_) => vec![ToShell::CommandResult {
-                    request_id,
-                    success: true,
-                    error: None,
-                }],
+                Ok(_) => {
+                    let _ = client.encryption().backups().wait_for_steady_state().await;
+                    vec![ToShell::CommandResult {
+                        request_id,
+                        success: true,
+                        error: None,
+                    }]
+                }
                 Err(e) => vec![ToShell::CommandResult {
                     request_id,
                     success: false,

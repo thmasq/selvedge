@@ -12,6 +12,9 @@ pub enum ToActor {
         username: String,
         password: String,
     },
+    Logout {
+        request_id: String,
+    },
     RestoreSession,
     StartSync,
     OpenRoom {

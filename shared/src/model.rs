@@ -38,6 +38,9 @@ pub enum ActorError {
     #[error("Failed to authenticate: {0}")]
     LoginFailed(String),
 
+    #[error("Failed to logout")]
+    LogoutFailed(String),
+
     #[error("Failed to start sync service: {0}")]
     SyncInitializationFailed(String),
 

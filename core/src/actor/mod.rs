@@ -53,6 +53,8 @@ impl MatrixActor {
             } => self.login(homeserver_url, username, password).await,
             ToActor::RestoreSession => self.restore_session().await,
 
+            ToActor::Logout { request_id } => self.logout(request_id).await,
+
             // --- Sync Handlers ---
             ToActor::StartSync => {
                 self.start_sync();
