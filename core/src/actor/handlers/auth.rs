@@ -1,4 +1,5 @@
 use super::super::MatrixActor;
+use gloo_storage::Storage;
 use matrix_sdk::Client;
 use selvedge_shared::{ActorError, message::ToShell};
 
@@ -45,6 +46,7 @@ impl MatrixActor {
             ))],
         }
     }
+
     #[allow(clippy::future_not_send)]
     pub(crate) async fn logout(&self, request_id: String) -> Vec<ToShell> {
         let client_opt = self.client.borrow().clone();
@@ -55,6 +57,20 @@ impl MatrixActor {
             match client.matrix_auth().logout().await {
                 Ok(_) => {
                     *self.client.borrow_mut() = None;
+
+                    self.active_timelines.borrow_mut().clear();
+                    self.active_sas_verifications.borrow_mut().clear();
+                    self.active_qr_verifications.borrow_mut().clear();
+
+                    *self.search_index.borrow_mut() = crate::actor::search::SearchIndex::default();
+                    let _ = gloo_storage::LocalStorage::clear();
+
+                    if let Some(window) = web_sys::window() {
+                        if let Ok(Some(idb)) = window.indexed_db() {
+                            let _ = idb.delete_database("matrix-sdk-crypto");
+                            let _ = idb.delete_database("matrix-sdk-state");
+                        }
+                    }
 
                     vec![ToShell::CommandResult {
                         request_id,
