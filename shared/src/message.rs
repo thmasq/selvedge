@@ -1,5 +1,5 @@
 use crate::model::{
-    ActorError, DeviceInfo, EventItem, RoomDetails, RoomListEntryDiff, TimelineDiff,
+    ActorError, DeviceInfo, EventItem, MediaSource, RoomDetails, RoomListEntryDiff, TimelineDiff,
     VerificationState,
 };
 use matrix_sdk::ruma::{OwnedEventId, OwnedRoomId, OwnedUserId};
@@ -151,6 +151,11 @@ pub enum ToActor {
         room_id: OwnedRoomId,
         user_id: OwnedUserId,
     },
+    FetchAndDecryptMedia {
+        request_id: String,
+        source: MediaSource,
+        mime_type: String,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -208,5 +213,10 @@ pub enum ToShell {
     RoomTrustLevelUpdated {
         room_id: OwnedRoomId,
         trust_level: crate::model::RoomTrustLevel,
+    },
+    MediaDecrypted {
+        request_id: String,
+        mime_type: String,
+        data: Vec<u8>,
     },
 }

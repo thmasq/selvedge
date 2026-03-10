@@ -1,5 +1,6 @@
 use super::super::MatrixActor;
 use matrix_sdk::attachment::AttachmentConfig;
+use matrix_sdk::media::{MediaFormat, MediaRequestParameters};
 use matrix_sdk::ruma::OwnedRoomId;
 use matrix_sdk::ruma::api::client::filter::RoomEventFilter;
 use matrix_sdk::ruma::api::client::search::search_events::v3::{
@@ -8,6 +9,7 @@ use matrix_sdk::ruma::api::client::search::search_events::v3::{
 use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
 use selvedge_shared::{
     ActorError, DeliveryStatus, EncryptionStatus, EventItem, TimelineContent, message::ToShell,
+    model::MediaSource,
 };
 use std::str::FromStr;
 
@@ -197,5 +199,48 @@ impl MatrixActor {
             request_id,
             results,
         }]
+    }
+
+    #[allow(clippy::future_not_send)]
+    pub(crate) async fn fetch_and_decrypt_media(
+        &self,
+        request_id: String,
+        source: MediaSource,
+        mime_type: String,
+    ) -> Vec<ToShell> {
+        let client = self.client.borrow().clone();
+
+        if let Some(client) = client {
+            let ruma_source = match source {
+                MediaSource::Plain(uri) => matrix_sdk::ruma::events::room::MediaSource::Plain(uri),
+                MediaSource::Encrypted(file) => {
+                    matrix_sdk::ruma::events::room::MediaSource::Encrypted(Box::new(*file))
+                }
+            };
+
+            let request = MediaRequestParameters {
+                source: ruma_source,
+                format: MediaFormat::File,
+            };
+
+            match client.media().get_media_content(&request, true).await {
+                Ok(data) => vec![ToShell::MediaDecrypted {
+                    request_id,
+                    mime_type,
+                    data,
+                }],
+                Err(e) => vec![ToShell::CommandResult {
+                    request_id,
+                    success: false,
+                    error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                }],
+            }
+        } else {
+            vec![ToShell::CommandResult {
+                request_id,
+                success: false,
+                error: Some(ActorError::ClientNotInitialized),
+            }]
+        }
     }
 }

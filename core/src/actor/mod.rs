@@ -120,6 +120,14 @@ impl MatrixActor {
                 self.search_messages(request_id, room_id, query, limit)
                     .await
             }
+            ToActor::FetchAndDecryptMedia {
+                request_id,
+                source,
+                mime_type,
+            } => {
+                self.fetch_and_decrypt_media(request_id, source, mime_type)
+                    .await
+            }
 
             // --- Crypto & Verification Handlers ---
             ToActor::RequestVerification {
