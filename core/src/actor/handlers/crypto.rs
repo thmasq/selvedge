@@ -126,12 +126,14 @@ impl MatrixActor {
             .borrow()
             .get(&flow_id)
             .cloned();
+
         if let Some(sas) = verification {
             let res = if emojis_match {
                 sas.confirm().await
             } else {
-                sas.cancel().await
+                sas.mismatch().await
             };
+
             match res {
                 Ok(_) => vec![ToShell::CommandResult {
                     request_id,
@@ -166,6 +168,7 @@ impl MatrixActor {
             .borrow()
             .get(&flow_id)
             .cloned();
+
         if let Some(sas) = verification {
             match sas.cancel().await {
                 Ok(_) => vec![ToShell::CommandResult {
