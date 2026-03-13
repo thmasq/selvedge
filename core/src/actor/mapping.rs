@@ -8,6 +8,7 @@ use matrix_sdk_ui::timeline::{
     EventSendState, Message, TimelineDetails, TimelineItemContent, TimelineItemKind,
     VirtualTimelineItem,
 };
+use ruma::presence::PresenceState;
 use selvedge_shared::{
     DeliveryStatus, EncryptionStatus, EventItem, ModelError, RoomListEntryDiff, RoomListEntryView,
     RoomSummary, TimelineContent, TimelineDiff, TimelineItem, VirtualItem,
@@ -101,7 +102,7 @@ pub(crate) async fn map_timeline_item_safe(
                         display_name: profile.display_name.clone(),
                         avatar_url: profile.avatar_url.clone(),
                         membership: matrix_sdk::ruma::events::room::member::MembershipState::Join,
-                        presence: selvedge_shared::PresenceState::Unknown,
+                        presence: PresenceState::Unavailable,
                         is_verified,
                     })
                 }

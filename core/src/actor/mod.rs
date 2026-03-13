@@ -230,6 +230,10 @@ impl MatrixActor {
                 room_id,
                 user_id,
             } => self.clear_room_warning(request_id, room_id, user_id).await,
+            ToActor::LoadRoomMembers {
+                request_id,
+                room_id,
+            } => self.load_room_members(request_id, room_id).await,
         }
     }
 }

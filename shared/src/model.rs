@@ -13,7 +13,7 @@ use matrix_sdk::ruma::{
         },
     },
 };
-use ruma::events::room::EncryptedFile;
+use ruma::{events::room::EncryptedFile, presence::PresenceState};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use thiserror::Error;
@@ -363,15 +363,6 @@ pub struct DeviceInfo {
     pub last_seen_ip: Option<String>,
     pub is_verified: bool,
     pub is_current_device: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub enum PresenceState {
-    Online,
-    #[default]
-    Offline,
-    Unavailable,
-    Unknown,
 }
 
 #[allow(clippy::struct_excessive_bools)]

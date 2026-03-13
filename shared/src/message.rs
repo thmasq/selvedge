@@ -1,6 +1,11 @@
-use crate::model::{
-    ActorError, DeviceInfo, EventItem, MediaSource, RoomDetails, RoomListEntryDiff, TimelineDiff,
-    VerificationState,
+use std::collections::HashMap;
+
+use crate::{
+    MemberProfile,
+    model::{
+        ActorError, DeviceInfo, EventItem, MediaSource, RoomDetails, RoomListEntryDiff,
+        TimelineDiff, VerificationState,
+    },
 };
 use matrix_sdk::ruma::{OwnedEventId, OwnedRoomId, OwnedUserId};
 use serde::{Deserialize, Serialize};
@@ -156,6 +161,10 @@ pub enum ToActor {
         source: MediaSource,
         mime_type: String,
     },
+    LoadRoomMembers {
+        request_id: String,
+        room_id: OwnedRoomId,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -219,5 +228,10 @@ pub enum ToShell {
         request_id: String,
         mime_type: String,
         data: Vec<u8>,
+    },
+    RoomMembersLoaded {
+        request_id: String,
+        room_id: OwnedRoomId,
+        members: HashMap<OwnedUserId, MemberProfile>,
     },
 }
