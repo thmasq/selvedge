@@ -6,7 +6,10 @@ use matrix_sdk::ruma::api::client::filter::RoomEventFilter;
 use matrix_sdk::ruma::api::client::search::search_events::v3::{
     Categories, Criteria, Request as SearchRequest,
 };
-use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
+use matrix_sdk::ruma::events::room::message::{
+    AddMentions, ForwardThread, RoomMessageEventContent,
+};
+use matrix_sdk::ruma::events::{AnyMessageLikeEvent, AnyTimelineEvent, MessageLikeEvent};
 use selvedge_shared::{
     ActorError, DeliveryStatus, EncryptionStatus, EventItem, TimelineContent, message::ToShell,
     model::MediaSource,
@@ -18,34 +21,56 @@ impl MatrixActor {
     pub(crate) async fn send_message(
         &self,
         request_id: String,
-        room_id: OwnedRoomId,
+        room_id: matrix_sdk::ruma::OwnedRoomId,
         body: String,
+        reply_to: Option<matrix_sdk::ruma::OwnedEventId>,
     ) -> Vec<ToShell> {
         let timeline = self.active_timelines.borrow().get(&room_id).cloned();
 
-        let result = if let Some(timeline) = timeline {
-            let content = RoomMessageEventContent::text_plain(body);
-            timeline
-                .send(content.into())
-                .await
-                .map(|_| ())
-                .map_err(|_e| ActorError::RoomOperationFailed("Timeline send failed".to_string()))
-        } else {
-            let room = self
-                .client
-                .borrow()
-                .as_ref()
-                .and_then(|c| c.get_room(&room_id));
+        let room = self
+            .client
+            .borrow()
+            .as_ref()
+            .and_then(|c| c.get_room(&room_id));
 
-            if let Some(room) = room {
-                let content = RoomMessageEventContent::text_plain(body);
+        let result = if let Some(room) = room {
+            let mut content = RoomMessageEventContent::text_plain(body);
+
+            if let Some(event_id) = reply_to {
+                if let Ok(event) = room.event(&event_id, None).await {
+                    if let Ok(any_event) = event.kind.into_raw().deserialize() {
+                        let full_event = any_event.into_full_event(room_id.clone());
+
+                        if let AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(
+                            MessageLikeEvent::Original(orig_msg),
+                        )) = full_event
+                        {
+                            content = content.make_reply_to(
+                                &orig_msg,
+                                ForwardThread::Yes,
+                                AddMentions::Yes,
+                            );
+                        }
+                    }
+                }
+            }
+
+            if let Some(timeline) = timeline {
+                timeline
+                    .send(content.into())
+                    .await
+                    .map(|_| ())
+                    .map_err(|_e| {
+                        ActorError::RoomOperationFailed("Timeline send failed".to_string())
+                    })
+            } else {
                 room.send(content)
                     .await
                     .map(|_| ())
                     .map_err(|e| ActorError::RoomOperationFailed(e.to_string()))
-            } else {
-                Err(ActorError::ClientNotInitialized)
             }
+        } else {
+            Err(ActorError::ClientNotInitialized)
         };
 
         match result {

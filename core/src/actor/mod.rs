@@ -99,8 +99,8 @@ impl MatrixActor {
                 request_id,
                 room_id,
                 body,
-                reply_to: _, // TODO: handle replies
-            } => self.send_message(request_id, room_id, body).await,
+                reply_to,
+            } => self.send_message(request_id, room_id, body, reply_to).await,
             ToActor::SendMedia {
                 request_id,
                 room_id,
