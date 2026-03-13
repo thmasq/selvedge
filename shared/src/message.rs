@@ -234,4 +234,12 @@ pub enum ToShell {
         room_id: OwnedRoomId,
         members: HashMap<OwnedUserId, MemberProfile>,
     },
+    ProfilesFetched {
+        room_id: OwnedRoomId,
+        profiles: HashMap<OwnedUserId, MemberProfile>,
+    },
+    TypingUpdated {
+        room_id: OwnedRoomId,
+        typing_users: Vec<OwnedUserId>,
+    },
 }
