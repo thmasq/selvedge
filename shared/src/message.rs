@@ -204,6 +204,7 @@ pub enum ToShell {
     },
     IdentityUpdated {
         user_id: OwnedUserId,
+        is_verified: bool,
     },
     RoomKeyRequestReceived {
         request_id: String,

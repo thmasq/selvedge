@@ -1,175 +1,119 @@
 use super::super::MatrixActor;
 use super::super::mapping::{map_timeline_diff, map_timeline_item_safe};
 use futures::StreamExt;
-use gloo_storage::{LocalStorage, Storage};
 use matrix_sdk::ruma::events::AnyInitialStateEvent;
 use matrix_sdk::ruma::events::room::encryption::RoomEncryptionEventContent;
 use matrix_sdk::ruma::serde::Raw;
 use matrix_sdk::ruma::{EventEncryptionAlgorithm, OwnedRoomId};
 use matrix_sdk_ui::timeline::RoomExt;
 use selvedge_shared::{
-    ActorError, MemberProfile, PresenceState, RoomDetails, RoomPermissions, RoomTrustLevel,
-    TimelineDiff, TimelineItem, message::ToShell,
+    ActorError, RoomDetails, RoomPermissions, RoomTrustLevel, TimelineDiff, message::ToShell,
 };
-use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
+use std::collections::{HashMap, HashSet, VecDeque};
 use wasm_bindgen_futures::spawn_local;
 
 impl MatrixActor {
     #[allow(clippy::future_not_send)]
     pub(crate) async fn open_room(&self, room_id: OwnedRoomId) {
         let client = self.client.borrow().clone();
-        if let Some(client) = client
-            && let Some(room) = client.get_room(&room_id)
-        {
-            let has_timeline = self.active_timelines.borrow().contains_key(&room_id);
+        if let Some(client) = client {
+            if let Some(room) = client.get_room(&room_id) {
+                let has_timeline = self.active_timelines.borrow().contains_key(&room_id);
 
-            if !has_timeline && let Ok(timeline) = room.timeline_builder().build().await {
-                let is_encrypted = room.encryption_state().is_encrypted();
+                if !has_timeline {
+                    if let Ok(timeline) = room.timeline_builder().build().await {
+                        let is_encrypted = room.encryption_state().is_encrypted();
 
-                let mut trust_level = if is_encrypted {
-                    RoomTrustLevel::Trusted
-                } else {
-                    RoomTrustLevel::Plain
-                };
-
-                let mut members_map = HashMap::new();
-                if let Ok(members) = room.members(matrix_sdk::RoomMemberships::ACTIVE).await {
-                    for member in members {
-                        let user_id = member.user_id().to_owned();
-
-                        let is_verified = if is_encrypted {
-                            let is_user_verified = client
-                                .encryption()
-                                .get_user_identity(&user_id)
-                                .await
-                                .ok()
-                                .flatten()
-                                .is_some_and(|identity| identity.is_verified());
-
-                            let storage_key = format!("trust_state_{}", user_id);
-                            let prev_verified: Option<bool> = LocalStorage::get(&storage_key).ok();
-
-                            if !is_user_verified {
-                                if prev_verified == Some(true) {
-                                    trust_level = RoomTrustLevel::Warning;
-                                } else if trust_level == RoomTrustLevel::Trusted {
-                                    trust_level = RoomTrustLevel::Normal;
-                                }
-                            } else if let Ok(devices) =
-                                client.encryption().get_user_devices(&user_id).await
-                            {
-                                for device in devices.devices() {
-                                    if !device.is_cross_signed_by_owner() {
-                                        trust_level = RoomTrustLevel::Warning;
-                                        break;
-                                    }
-                                }
-                            }
-
-                            let _ = LocalStorage::set(&storage_key, is_user_verified);
-
-                            is_user_verified
+                        let trust_level = if is_encrypted {
+                            RoomTrustLevel::Trusted
                         } else {
-                            false
+                            RoomTrustLevel::Plain
                         };
 
-                        members_map.insert(
-                            user_id.clone(),
-                            MemberProfile {
-                                user_id,
-                                display_name: member.display_name().map(ToOwned::to_owned),
-                                avatar_url: member.avatar_url().map(ToOwned::to_owned),
-                                membership: member.membership().clone(),
-                                presence: PresenceState::Unknown,
-                                is_verified,
+                        let members_map = HashMap::new();
+
+                        self.send_event(ToShell::RoomDetailsUpdate {
+                            room_id: room_id.clone(),
+                            details: RoomDetails {
+                                room_id: room_id.clone(),
+                                name: room.name(),
+                                topic: room.topic(),
+                                avatar_url: room.avatar_url(),
+                                members: members_map,
+                                timeline: VecDeque::new(),
+                                typing_users: HashSet::new(),
+                                active_call: None,
+                                is_encrypted,
+                                trust_level,
+                                permissions: RoomPermissions::default(),
+                                prev_batch: None,
+                                next_batch: None,
+                                fully_read_marker: None,
                             },
-                        );
-                    }
-                }
+                        });
 
-                self.send_event(ToShell::RoomDetailsUpdate {
-                    room_id: room_id.clone(),
-                    details: RoomDetails {
-                        room_id: room_id.clone(),
-                        name: room.name(),
-                        topic: room.topic(),
-                        avatar_url: room.avatar_url(),
-                        members: members_map,
-                        timeline: std::collections::VecDeque::new(),
-                        typing_users: HashSet::new(),
-                        active_call: None,
-                        is_encrypted,
-                        trust_level,
-                        permissions: RoomPermissions::default(),
-                        prev_batch: None,
-                        next_batch: None,
-                        fully_read_marker: None,
-                    },
-                });
+                        let (items, mut stream) = timeline.subscribe().await;
 
-                let (items, mut stream) = timeline.subscribe().await;
+                        let mut initial_views = Vec::new();
+                        for i in items {
+                            let mapped = map_timeline_item_safe(&client, &i).await;
+                            self.search_index.borrow_mut().index_item(&room_id, &mapped);
+                            initial_views.push(mapped);
+                        }
 
-                let initial_views: Vec<TimelineItem> = items
-                    .into_iter()
-                    .map(|i| {
-                        let mapped = map_timeline_item_safe(&i);
-                        self.search_index.borrow_mut().index_item(&room_id, &mapped);
-                        mapped
-                    })
-                    .collect();
+                        self.send_event(ToShell::TimelineDiff {
+                            room_id: room_id.clone(),
+                            diff: vec![TimelineDiff::Reset {
+                                entries: initial_views,
+                            }],
+                        });
 
-                self.send_event(ToShell::TimelineDiff {
-                    room_id: room_id.clone(),
-                    diff: vec![TimelineDiff::Reset {
-                        entries: initial_views,
-                    }],
-                });
+                        self.active_timelines
+                            .borrow_mut()
+                            .insert(room_id.clone(), std::rc::Rc::new(timeline));
 
-                self.active_timelines
-                    .borrow_mut()
-                    .insert(room_id.clone(), Rc::new(timeline));
+                        let sender = self.event_sender.clone();
+                        let stream_room_id = room_id.clone();
+                        let search_index = self.search_index.clone();
+                        let mapper_client = client.clone();
 
-                let sender = self.event_sender.clone();
-                let stream_room_id = room_id.clone();
-                let search_index = self.search_index.clone();
+                        spawn_local(async move {
+                            while let Some(diffs) = stream.next().await {
+                                let mut mapped_diffs = Vec::new();
 
-                spawn_local(async move {
-                    while let Some(diffs) = stream.next().await {
-                        let mapped_diffs: Vec<TimelineDiff> = diffs
-                            .into_iter()
-                            .map(|diff| {
-                                let mapped_diff = map_timeline_diff(diff);
+                                for diff in diffs {
+                                    let mapped_diff = map_timeline_diff(&mapper_client, diff).await;
 
-                                match &mapped_diff {
-                                    TimelineDiff::Append { entries }
-                                    | TimelineDiff::Reset { entries } => {
-                                        let mut idx = search_index.borrow_mut();
-                                        for entry in entries {
-                                            idx.index_item(&stream_room_id, entry);
+                                    match &mapped_diff {
+                                        TimelineDiff::Append { entries }
+                                        | TimelineDiff::Reset { entries } => {
+                                            let mut idx = search_index.borrow_mut();
+                                            for entry in entries {
+                                                idx.index_item(&stream_room_id, entry);
+                                            }
                                         }
+                                        TimelineDiff::PushFront { entry }
+                                        | TimelineDiff::PushBack { entry }
+                                        | TimelineDiff::Insert { entry, .. }
+                                        | TimelineDiff::Set { entry, .. } => {
+                                            search_index
+                                                .borrow_mut()
+                                                .index_item(&stream_room_id, entry);
+                                        }
+                                        _ => {}
                                     }
-                                    TimelineDiff::PushFront { entry }
-                                    | TimelineDiff::PushBack { entry }
-                                    | TimelineDiff::Insert { entry, .. }
-                                    | TimelineDiff::Set { entry, .. } => {
-                                        search_index
-                                            .borrow_mut()
-                                            .index_item(&stream_room_id, entry);
-                                    }
-                                    _ => {}
+
+                                    mapped_diffs.push(mapped_diff);
                                 }
 
-                                mapped_diff
-                            })
-                            .collect();
-
-                        let _ = sender.unbounded_send(ToShell::TimelineDiff {
-                            room_id: stream_room_id.clone(),
-                            diff: mapped_diffs,
+                                let _ = sender.unbounded_send(ToShell::TimelineDiff {
+                                    room_id: stream_room_id.clone(),
+                                    diff: mapped_diffs,
+                                });
+                            }
                         });
                     }
-                });
+                }
             }
         }
     }

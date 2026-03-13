@@ -52,11 +52,20 @@ impl MatrixActor {
 
             client.add_event_handler(
                 move |ev: ToDeviceEvent<ToDeviceKeyVerificationDoneEventContent>,
-                      _client: Client| {
+                      event_client: Client| {
                     let sender_for_async = verification_done_sender.clone();
                     async move {
+                        let is_verified = event_client
+                            .encryption()
+                            .get_user_identity(&ev.sender)
+                            .await
+                            .ok()
+                            .flatten()
+                            .is_some_and(|id| id.is_verified());
+
                         let _ = sender_for_async.unbounded_send(ToShell::IdentityUpdated {
-                            user_id: ev.sender.clone(),
+                            user_id: ev.sender,
+                            is_verified,
                         });
                     }
                 },
