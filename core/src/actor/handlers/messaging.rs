@@ -10,6 +10,7 @@ use matrix_sdk::ruma::events::room::message::{
     AddMentions, ForwardThread, RoomMessageEventContent,
 };
 use matrix_sdk::ruma::events::{AnyMessageLikeEvent, AnyTimelineEvent, MessageLikeEvent};
+use pulldown_cmark::{Options, Parser, html};
 use selvedge_shared::{
     ActorError, DeliveryStatus, EncryptionStatus, EventItem, TimelineContent, message::ToShell,
     model::MediaSource,
@@ -34,7 +35,18 @@ impl MatrixActor {
             .and_then(|c| c.get_room(&room_id));
 
         let result = if let Some(room) = room {
-            let mut content = RoomMessageEventContent::text_plain(body);
+            let mut options = Options::empty();
+            options.insert(Options::ENABLE_STRIKETHROUGH);
+            options.insert(Options::ENABLE_TABLES);
+
+            let parser = Parser::new_ext(&body, options);
+            let mut raw_html = String::new();
+            html::push_html(&mut raw_html, parser);
+
+            let safe_html = selvedge_shared::sanitize_matrix_html(&raw_html);
+            let trimmed_html = safe_html.trim().to_string();
+
+            let mut content = RoomMessageEventContent::text_html(body.clone(), trimmed_html);
 
             if let Some(event_id) = reply_to {
                 if let Ok(event) = room.event(&event_id, None).await {

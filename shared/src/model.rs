@@ -491,7 +491,7 @@ impl From<RoomMessageEventContent> for TimelineContent {
         match content.msgtype {
             MessageType::Text(t) => Self::Message(MessageContent::Text {
                 body: t.body,
-                formatted: t.formatted.map(|f| f.body),
+                formatted: t.formatted.map(|f| crate::sanitize_matrix_html(&f.body)),
                 previews: Vec::new(),
             }),
             MessageType::Image(i) => Self::Message(MessageContent::Image {
@@ -530,11 +530,11 @@ impl From<RoomMessageEventContent> for TimelineContent {
             }),
             MessageType::Notice(n) => Self::Message(MessageContent::Notice {
                 body: n.body,
-                formatted: n.formatted.map(|f| f.body),
+                formatted: n.formatted.map(|f| crate::sanitize_matrix_html(&f.body)),
             }),
             MessageType::Emote(e) => Self::Message(MessageContent::Emote {
                 body: e.body,
-                formatted: e.formatted.map(|f| f.body),
+                formatted: e.formatted.map(|f| crate::sanitize_matrix_html(&f.body)),
             }),
             MessageType::Location(l) => Self::Message(MessageContent::Location {
                 body: l.body,

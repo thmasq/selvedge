@@ -6,7 +6,7 @@ This document tracks the feature completion of the Core actor for the Selvedge M
 
 ### Milestone 1: Core Chat Primitives (Messaging & Timeline)
 
-- [ ] **Rich Text Formatting:** Compile Markdown to HTML locally and send `text_html` alongside `text_plain`.
+- [x] **Rich Text Formatting:** Compile Markdown to HTML locally and send `text_html` alongside `text_plain`.
 - [ ] **Emotes (`m.emote`):** Intercept `/me` commands in the Core to send the `m.emote` message type instead of standard text.
 - [ ] **Unknown Message Fallbacks:** Render the standard `body` string for unrecognized custom `msgtype` or event types.
 - [ ] **Notice Handling (`m.notice`):** Map `m.notice` events explicitly so the UI can render bot/bridge messages appropriately.

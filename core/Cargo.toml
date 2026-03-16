@@ -23,6 +23,7 @@ js-sys = { workspace = true }
 matrix-sdk = { workspace = true }
 matrix-sdk-ui = { workspace = true }
 mime = { workspace = true }
+pulldown-cmark = { workspace = true }
 ruma = { workspace = true }
 selvedge-shared = { path = "../shared" }
 serde = { workspace = true, features = ["derive"] }
