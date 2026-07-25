@@ -14,7 +14,7 @@ pub async fn run(actor: &MatrixActor, args: LeaveRoomArgs) -> Vec<ToShell> {
 
     if let Some(room) = room {
         match room.leave().await {
-            Ok(_) => {
+            Ok(()) => {
                 actor.active_timelines.borrow_mut().remove(&args.room_id);
                 vec![ToShell::Core(CoreEvents::CommandResult(
                     CommandResultArgs {

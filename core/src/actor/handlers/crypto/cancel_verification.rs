@@ -14,7 +14,7 @@ pub async fn run(actor: &MatrixActor, args: CancelVerificationArgs) -> Vec<ToShe
 
     if let Some(sas) = verification {
         match sas.cancel().await {
-            Ok(_) => vec![ToShell::Core(CoreEvents::CommandResult(
+            Ok(()) => vec![ToShell::Core(CoreEvents::CommandResult(
                 CommandResultArgs {
                     request_id: args.request_id,
                     success: true,

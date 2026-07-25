@@ -20,7 +20,7 @@ pub async fn run(actor: &MatrixActor, args: ConfirmVerificationArgs) -> Vec<ToSh
         };
 
         match res {
-            Ok(_) => vec![ToShell::Core(CoreEvents::CommandResult(
+            Ok(()) => vec![ToShell::Core(CoreEvents::CommandResult(
                 CommandResultArgs {
                     request_id: args.request_id,
                     success: true,

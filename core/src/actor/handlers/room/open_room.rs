@@ -13,12 +13,12 @@ use wasm_bindgen_futures::spawn_local;
 
 pub async fn run(actor: &MatrixActor, args: OpenRoomArgs) -> Vec<ToShell> {
     let client = actor.client.borrow().clone();
-    if let Some(client) = client {
-        if let Some(room) = client.get_room(&args.room_id) {
+    if let Some(client) = client
+        && let Some(room) = client.get_room(&args.room_id) {
             let has_timeline = actor.active_timelines.borrow().contains_key(&args.room_id);
 
-            if !has_timeline {
-                if let Ok(timeline) = room.timeline_builder().build().await {
+            if !has_timeline
+                && let Ok(timeline) = room.timeline_builder().build().await {
                     let is_encrypted = room.encryption_state().is_encrypted();
 
                     let trust_level = if is_encrypted {
@@ -113,8 +113,6 @@ pub async fn run(actor: &MatrixActor, args: OpenRoomArgs) -> Vec<ToShell> {
                         }
                     });
                 }
-            }
         }
-    }
     vec![]
 }

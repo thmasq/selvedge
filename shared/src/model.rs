@@ -175,7 +175,7 @@ pub struct RoomDetails {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "content")]
 pub enum TimelineItem {
-    Event(EventItem),
+    Event(Box<EventItem>),
     Virtual(VirtualItem),
 }
 

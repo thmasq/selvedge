@@ -3,35 +3,34 @@ use selvedge_shared::{EventItem, MessageContent, TimelineContent, TimelineItem};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Default)]
-pub(crate) struct SearchIndex {
+pub struct SearchIndex {
     word_to_events: HashMap<String, HashSet<OwnedEventId>>,
     event_store: HashMap<OwnedEventId, (OwnedRoomId, EventItem)>,
 }
 
 impl SearchIndex {
     pub(crate) fn index_item(&mut self, room_id: &OwnedRoomId, item: &TimelineItem) {
-        if let TimelineItem::Event(event_item) = item {
-            if let TimelineContent::Message(MessageContent::Text { body, .. }) =
+        if let TimelineItem::Event(event_item) = item
+            && let TimelineContent::Message(MessageContent::Text { body, .. }) =
                 &*event_item.content
-            {
-                let tokens: Vec<String> = body
-                    .to_lowercase()
-                    .split_whitespace()
-                    .map(|s| s.to_string())
-                    .collect();
+        {
+            let tokens: Vec<String> = body
+                .to_lowercase()
+                .split_whitespace()
+                .map(std::string::ToString::to_string)
+                .collect();
 
-                for token in tokens {
-                    self.word_to_events
-                        .entry(token)
-                        .or_default()
-                        .insert(event_item.event_id.clone());
-                }
-
-                self.event_store.insert(
-                    event_item.event_id.clone(),
-                    (room_id.clone(), event_item.clone()),
-                );
+            for token in tokens {
+                self.word_to_events
+                    .entry(token)
+                    .or_default()
+                    .insert(event_item.event_id.clone());
             }
+
+            self.event_store.insert(
+                event_item.event_id.clone(),
+                (room_id.clone(), *event_item.clone()),
+            );
         }
     }
 
@@ -44,7 +43,7 @@ impl SearchIndex {
         let tokens: Vec<String> = query
             .to_lowercase()
             .split_whitespace()
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .collect();
         if tokens.is_empty() {
             return vec![];
@@ -71,7 +70,7 @@ impl SearchIndex {
         let mut matched_events: Vec<EventItem> = intersection
             .into_iter()
             .filter_map(|id| self.event_store.get(&id))
-            .filter(|(r_id, _)| room_id_filter.map_or(true, |f| f == r_id))
+            .filter(|(r_id, _)| room_id_filter.is_none_or(|f| f == r_id))
             .map(|(_, item)| item.clone())
             .collect();
 

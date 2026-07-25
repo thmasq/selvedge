@@ -18,7 +18,7 @@ pub async fn run(actor: &MatrixActor, args: ConfirmQrScanArgs) -> Vec<ToShell> {
             ) {
                 Ok(qr_data) => match request.scan_qr_code(qr_data).await {
                     Ok(Some(qr)) => match qr.confirm().await {
-                        Ok(_) => vec![ToShell::Core(CoreEvents::CommandResult(
+                        Ok(()) => vec![ToShell::Core(CoreEvents::CommandResult(
                             CommandResultArgs {
                                 request_id: args.request_id,
                                 success: true,
@@ -55,8 +55,7 @@ pub async fn run(actor: &MatrixActor, args: ConfirmQrScanArgs) -> Vec<ToShell> {
                         request_id: args.request_id,
                         success: false,
                         error: Some(ActorError::RoomOperationFailed(format!(
-                            "Invalid QR data: {}",
-                            e
+                            "Invalid QR data: {e}"
                         ))),
                     },
                 ))],

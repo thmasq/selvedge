@@ -17,55 +17,52 @@ use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 
-pub(crate) async fn map_timeline_item_safe(
+pub async fn map_timeline_item_safe(
     client: &Client,
     item: &matrix_sdk_ui::timeline::TimelineItem,
 ) -> TimelineItem {
     match item.kind() {
         TimelineItemKind::Event(event) => {
             let mut content = match event.content() {
-                TimelineItemContent::MsgLike(msg) => {
-                    if let Some(msg_content) = msg.as_message() {
+                TimelineItemContent::MsgLike(msg) => msg.as_message().map_or_else(
+                    || TimelineContent::Unsupported,
+                    |msg_content| {
                         let ruma_content =
                             RoomMessageEventContent::new(msg_content.msgtype().clone());
                         ruma_content.into()
-                    } else {
-                        TimelineContent::Unsupported
-                    }
-                }
+                    },
+                ),
                 _ => TimelineContent::Unsupported,
             };
 
-            if matches!(content, TimelineContent::Unsupported) {
-                if let Some(raw_json) = event.latest_json() {
-                    if let Ok(Some(event_type)) = raw_json.get_field::<String>("type") {
-                        if event_type == "m.room.encrypted" {
-                            let content_val = raw_json
-                                .get_field::<serde_json::Value>("content")
-                                .ok()
-                                .flatten();
+            if matches!(content, TimelineContent::Unsupported)
+                && let Some(raw_json) = event.latest_json()
+                && let Ok(Some(event_type)) = raw_json.get_field::<String>("type")
+                && event_type == "m.room.encrypted"
+            {
+                let content_val = raw_json
+                    .get_field::<serde_json::Value>("content")
+                    .ok()
+                    .flatten();
 
-                            let session_id = content_val
-                                .as_ref()
-                                .and_then(|c| c.get("session_id"))
-                                .and_then(|s| s.as_str())
-                                .unwrap_or_default()
-                                .to_string();
+                let session_id = content_val
+                    .as_ref()
+                    .and_then(|c| c.get("session_id"))
+                    .and_then(|s| s.as_str())
+                    .unwrap_or_default()
+                    .to_string();
 
-                            let sender_key = content_val
-                                .as_ref()
-                                .and_then(|c| c.get("sender_key"))
-                                .and_then(|s| s.as_str())
-                                .unwrap_or_default()
-                                .to_string();
+                let sender_key = content_val
+                    .as_ref()
+                    .and_then(|c| c.get("sender_key"))
+                    .and_then(|s| s.as_str())
+                    .unwrap_or_default()
+                    .to_string();
 
-                            content = TimelineContent::Undecryptable {
-                                session_id,
-                                sender_key,
-                            };
-                        }
-                    }
-                }
+                content = TimelineContent::Undecryptable {
+                    session_id,
+                    sender_key,
+                };
             }
 
             let delivery_status = event
@@ -109,7 +106,7 @@ pub(crate) async fn map_timeline_item_safe(
                 _ => None,
             };
 
-            TimelineItem::Event(EventItem {
+            TimelineItem::Event(Box::new(EventItem {
                 event_id,
                 sender: event.sender().to_owned(),
                 sender_profile,
@@ -126,7 +123,7 @@ pub(crate) async fn map_timeline_item_safe(
                 is_highlight: event.is_highlighted(),
                 should_group: false,
                 encryption_status: EncryptionStatus::Unencrypted,
-            })
+            }))
         }
         TimelineItemKind::Virtual(virt) => match virt {
             VirtualTimelineItem::DateDivider(ts) => {
@@ -139,7 +136,7 @@ pub(crate) async fn map_timeline_item_safe(
     }
 }
 
-pub(crate) async fn map_timeline_diff(
+pub async fn map_timeline_diff(
     client: &Client,
     diff: VectorDiff<Arc<matrix_sdk_ui::timeline::TimelineItem>>,
 ) -> TimelineDiff {
@@ -181,10 +178,7 @@ pub(crate) async fn map_timeline_diff(
 }
 
 #[allow(clippy::future_not_send)]
-pub(crate) async fn room_list_item_to_view(
-    client: Client,
-    item: RoomListItem,
-) -> RoomListEntryView {
+pub async fn room_list_item_to_view(client: Client, item: RoomListItem) -> RoomListEntryView {
     let unread = item.unread_notification_counts();
 
     let last_activity = item
@@ -192,11 +186,9 @@ pub(crate) async fn room_list_item_to_view(
         .and_then(|e| e.event().timestamp())
         .unwrap_or_else(|| MilliSecondsSinceUnixEpoch(0u32.into()));
 
-    let is_encrypted = if let Some(room) = client.get_room(item.room_id()) {
-        room.encryption_state().is_encrypted()
-    } else {
-        false
-    };
+    let is_encrypted = client
+        .get_room(item.room_id())
+        .is_some_and(|room| room.encryption_state().is_encrypted());
 
     let summary = RoomSummary {
         room_id: item.room_id().to_owned(),
@@ -218,7 +210,7 @@ pub(crate) async fn room_list_item_to_view(
 }
 
 #[allow(clippy::future_not_send)]
-pub(crate) async fn map_room_list_diff(
+pub async fn map_room_list_diff(
     client: Client,
     diff: VectorDiff<RoomListItem>,
 ) -> RoomListEntryDiff {

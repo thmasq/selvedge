@@ -9,7 +9,7 @@ pub async fn run(actor: &MatrixActor, args: EnableKeyBackupArgs) -> Vec<ToShell>
     let client = actor.client.borrow().clone();
     if let Some(client) = client {
         match client.encryption().backups().create().await {
-            Ok(_) => {
+            Ok(()) => {
                 let _ = client.encryption().backups().wait_for_steady_state().await;
                 vec![ToShell::Core(CoreEvents::CommandResult(
                     CommandResultArgs {

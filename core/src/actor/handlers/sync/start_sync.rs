@@ -135,14 +135,13 @@ pub async fn run(actor: &MatrixActor, _args: StartSyncArgs) -> Vec<ToShell> {
         );
 
         client.add_event_handler(
-            move |ev: ToDeviceEvent<ToDeviceKeyVerificationRequestEventContent>,
-                  _client: Client| {
+            move |ev: ToDeviceEvent<ToDeviceKeyVerificationRequestEventContent>, client: Client| {
                 let sender_for_async = verification_sender.clone();
                 async move {
                     let user_id = ev.sender.clone();
                     let flow_id = ev.content.transaction_id.to_string();
 
-                    if let Some(request) = _client
+                    if let Some(request) = client
                         .encryption()
                         .get_verification_request(&user_id, &flow_id)
                         .await

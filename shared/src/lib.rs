@@ -13,6 +13,7 @@ pub use model::{
     VerificationRequest, VerificationState, VideoInfo, VirtualItem,
 };
 
+#[must_use]
 pub fn sanitize_matrix_html(raw_html: &str) -> String {
     Builder::default()
         .add_tags([

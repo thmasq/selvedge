@@ -14,7 +14,7 @@ pub async fn run(actor: &MatrixActor, args: DeleteDeviceArgs) -> Vec<ToShell> {
             let identifier = matrix_sdk::ruma::api::client::uiaa::UserIdentifier::UserIdOrLocalpart(
                 client
                     .user_id()
-                    .map(|id| id.to_string())
+                    .map(std::string::ToString::to_string)
                     .unwrap_or_default(),
             );
             let mut uiaa_password =
@@ -46,14 +46,13 @@ pub async fn run(actor: &MatrixActor, args: DeleteDeviceArgs) -> Vec<ToShell> {
                 },
             ))],
             Err(e) => {
-                if let Some(uiaa_info) = e.as_uiaa_response() {
-                    if let Some(session) = &uiaa_info.session {
+                if let Some(uiaa_info) = e.as_uiaa_response()
+                    && let Some(session) = &uiaa_info.session {
                         return vec![ToShell::Crypto(CryptoEvents::UiaaPrompt(UiaaPromptArgs {
                             request_id: args.request_id,
                             session: session.clone(),
                         }))];
                     }
-                }
                 vec![ToShell::Core(CoreEvents::CommandResult(
                     CommandResultArgs {
                         request_id: args.request_id,

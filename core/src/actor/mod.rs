@@ -18,7 +18,7 @@ use std::rc::Rc;
 use search::SearchIndex;
 use selvedge_shared::event::ToShell;
 
-pub(crate) struct MatrixActor {
+pub struct MatrixActor {
     pub(crate) client: RefCell<Option<Client>>,
     pub(crate) event_sender: mpsc::UnboundedSender<ToShell>,
     pub(crate) active_timelines: RefCell<HashMap<OwnedRoomId, Rc<Timeline>>>,

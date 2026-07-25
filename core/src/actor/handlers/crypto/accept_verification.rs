@@ -14,29 +14,7 @@ pub async fn run(actor: &MatrixActor, args: AcceptVerificationArgs) -> Vec<ToShe
             .await
         {
             match request.accept().await {
-                Ok(_) => vec![ToShell::Core(CoreEvents::CommandResult(
-                    CommandResultArgs {
-                        request_id: args.request_id,
-                        success: true,
-                        error: None,
-                    },
-                ))],
-                Err(e) => vec![ToShell::Core(CoreEvents::CommandResult(
-                    CommandResultArgs {
-                        request_id: args.request_id,
-                        success: false,
-                        error: Some(ActorError::RoomOperationFailed(e.to_string())),
-                    },
-                ))],
-            }
-        } else if let Some(sas) = actor
-            .active_sas_verifications
-            .borrow()
-            .get(&args.flow_id)
-            .cloned()
-        {
-            match sas.accept().await {
-                Ok(_) => vec![ToShell::Core(CoreEvents::CommandResult(
+                Ok(()) => vec![ToShell::Core(CoreEvents::CommandResult(
                     CommandResultArgs {
                         request_id: args.request_id,
                         success: true,
@@ -52,15 +30,40 @@ pub async fn run(actor: &MatrixActor, args: AcceptVerificationArgs) -> Vec<ToShe
                 ))],
             }
         } else {
-            vec![ToShell::Core(CoreEvents::CommandResult(
-                CommandResultArgs {
-                    request_id: args.request_id,
-                    success: false,
-                    error: Some(ActorError::RoomOperationFailed(
-                        "Verification flow not found".into(),
-                    )),
-                },
-            ))]
+            let sas = actor
+                .active_sas_verifications
+                .borrow()
+                .get(&args.flow_id)
+                .cloned();
+
+            if let Some(sas) = sas {
+                match sas.accept().await {
+                    Ok(()) => vec![ToShell::Core(CoreEvents::CommandResult(
+                        CommandResultArgs {
+                            request_id: args.request_id,
+                            success: true,
+                            error: None,
+                        },
+                    ))],
+                    Err(e) => vec![ToShell::Core(CoreEvents::CommandResult(
+                        CommandResultArgs {
+                            request_id: args.request_id,
+                            success: false,
+                            error: Some(ActorError::RoomOperationFailed(e.to_string())),
+                        },
+                    ))],
+                }
+            } else {
+                vec![ToShell::Core(CoreEvents::CommandResult(
+                    CommandResultArgs {
+                        request_id: args.request_id,
+                        success: false,
+                        error: Some(ActorError::RoomOperationFailed(
+                            "Verification flow not found".into(),
+                        )),
+                    },
+                ))]
+            }
         }
     } else {
         vec![ToShell::Core(CoreEvents::CommandResult(

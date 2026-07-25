@@ -35,9 +35,9 @@ pub async fn run(actor: &MatrixActor, args: SendMessageArgs) -> Vec<ToShell> {
 
         let mut content = RoomMessageEventContent::text_html(args.body.clone(), trimmed_html);
 
-        if let Some(event_id) = args.reply_to {
-            if let Ok(event) = room.event(&event_id, None).await {
-                if let Ok(any_event) = event.kind.into_raw().deserialize() {
+        if let Some(event_id) = args.reply_to
+            && let Ok(event) = room.event(&event_id, None).await
+                && let Ok(any_event) = event.kind.into_raw().deserialize() {
                     let full_event = any_event.into_full_event(args.room_id.clone());
 
                     if let AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(
@@ -48,8 +48,6 @@ pub async fn run(actor: &MatrixActor, args: SendMessageArgs) -> Vec<ToShell> {
                             content.make_reply_to(&orig_msg, ForwardThread::Yes, AddMentions::Yes);
                     }
                 }
-            }
-        }
 
         if let Some(timeline) = timeline {
             timeline
@@ -68,7 +66,7 @@ pub async fn run(actor: &MatrixActor, args: SendMessageArgs) -> Vec<ToShell> {
     };
 
     match result {
-        Ok(_) => vec![ToShell::Core(CoreEvents::CommandResult(
+        Ok(()) => vec![ToShell::Core(CoreEvents::CommandResult(
             CommandResultArgs {
                 request_id: args.request_id,
                 success: true,

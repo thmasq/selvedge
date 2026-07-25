@@ -15,8 +15,8 @@ pub async fn run(actor: &MatrixActor, args: SearchMessagesArgs) -> Vec<ToShell> 
 
     let mut server_results: Option<Vec<EventItem>> = None;
 
-    if let (Some(client), Some(r_id)) = (&client_opt, &args.room_id) {
-        if let Some(room) = client.get_room(r_id) {
+    if let (Some(client), Some(r_id)) = (&client_opt, &args.room_id)
+        && let Some(room) = client.get_room(r_id) {
             let is_encrypted = room.encryption_state().is_encrypted();
 
             if !is_encrypted {
@@ -36,11 +36,10 @@ pub async fn run(actor: &MatrixActor, args: SearchMessagesArgs) -> Vec<ToShell> 
                     let mut items = Vec::new();
 
                     for result in response.search_categories.room_events.results {
-                        if let Some(raw_event) = result.result {
-                            if let Ok(Some(event_id)) =
+                        if let Some(raw_event) = result.result
+                            && let Ok(Some(event_id)) =
                                 raw_event.get_field::<matrix_sdk::ruma::OwnedEventId>("event_id")
-                            {
-                                if let Ok(Some(sender)) =
+                                && let Ok(Some(sender)) =
                                     raw_event.get_field::<matrix_sdk::ruma::OwnedUserId>("sender")
                                 {
                                     let timestamp = raw_event
@@ -74,15 +73,12 @@ pub async fn run(actor: &MatrixActor, args: SearchMessagesArgs) -> Vec<ToShell> 
                                         encryption_status: EncryptionStatus::Unencrypted,
                                     });
                                 }
-                            }
-                        }
                     }
 
                     server_results = Some(items);
                 }
             }
         }
-    }
 
     let results = server_results.unwrap_or_else(|| {
         search_index

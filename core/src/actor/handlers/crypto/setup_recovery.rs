@@ -28,9 +28,9 @@ pub async fn run(actor: &MatrixActor, args: SetupRecoveryArgs) -> Vec<ToShell> {
                 ))]
             }
             Err(e) => {
-                if let matrix_sdk::encryption::recovery::RecoveryError::Sdk(sdk_err) = &e {
-                    if let Some(uiaa_info) = sdk_err.as_uiaa_response() {
-                        if let Some(session) = &uiaa_info.session {
+                if let matrix_sdk::encryption::recovery::RecoveryError::Sdk(sdk_err) = &e
+                    && let Some(uiaa_info) = sdk_err.as_uiaa_response()
+                        && let Some(session) = &uiaa_info.session {
                             return vec![ToShell::Crypto(CryptoEvents::UiaaPrompt(
                                 UiaaPromptArgs {
                                     request_id: args.request_id,
@@ -38,8 +38,6 @@ pub async fn run(actor: &MatrixActor, args: SetupRecoveryArgs) -> Vec<ToShell> {
                                 },
                             ))];
                         }
-                    }
-                }
                 vec![ToShell::Core(CoreEvents::CommandResult(
                     CommandResultArgs {
                         request_id: args.request_id,

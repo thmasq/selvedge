@@ -19,14 +19,11 @@ pub async fn run(actor: &MatrixActor, args: GetMyDevicesArgs) -> Vec<ToShell> {
                 let crypto_devices = client.encryption().get_user_devices(user_id).await.ok();
 
                 for device in response.devices {
-                    let is_verified = if let Some(cd) = &crypto_devices {
+                    let is_verified = crypto_devices.as_ref().is_some_and(|cd| {
                         cd.devices()
                             .find(|d| d.device_id() == device.device_id)
-                            .map(|d| d.is_cross_signed_by_owner())
-                            .unwrap_or(false)
-                    } else {
-                        false
-                    };
+                            .is_some_and(|d| d.is_cross_signed_by_owner())
+                    });
 
                     device_infos.push(DeviceInfo {
                         device_id: device.device_id.to_string(),

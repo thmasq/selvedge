@@ -21,8 +21,8 @@ pub async fn run(actor: &MatrixActor, args: ClearRoomWarningArgs) -> Vec<ToShell
     ))];
 
     let client = actor.client.borrow().clone();
-    if let Some(client) = client {
-        if let Some(room) = client.get_room(&args.room_id) {
+    if let Some(client) = client
+        && let Some(room) = client.get_room(&args.room_id) {
             let is_encrypted = room.encryption_state().is_encrypted();
             let mut trust_level = if is_encrypted {
                 RoomTrustLevel::Trusted
@@ -30,8 +30,8 @@ pub async fn run(actor: &MatrixActor, args: ClearRoomWarningArgs) -> Vec<ToShell
                 RoomTrustLevel::Plain
             };
 
-            if is_encrypted {
-                if let Ok(members) = room.members(matrix_sdk::RoomMemberships::ACTIVE).await {
+            if is_encrypted
+                && let Ok(members) = room.members(matrix_sdk::RoomMemberships::ACTIVE).await {
                     for member in members {
                         let m_user_id = member.user_id().to_owned();
                         let is_user_verified = client
@@ -41,7 +41,7 @@ pub async fn run(actor: &MatrixActor, args: ClearRoomWarningArgs) -> Vec<ToShell
                             .ok()
                             .flatten()
                             .is_some_and(|identity| identity.is_verified());
-                        let m_storage_key = format!("trust_state_{}", m_user_id);
+                        let m_storage_key = format!("trust_state_{m_user_id}");
                         let prev_verified: Option<bool> = LocalStorage::get(&m_storage_key).ok();
 
                         if !is_user_verified {
@@ -66,7 +66,6 @@ pub async fn run(actor: &MatrixActor, args: ClearRoomWarningArgs) -> Vec<ToShell
                         }
                     }
                 }
-            }
 
             responses.push(ToShell::Room(RoomEvents::RoomTrustLevelUpdated(
                 RoomTrustLevelUpdatedArgs {
@@ -75,7 +74,6 @@ pub async fn run(actor: &MatrixActor, args: ClearRoomWarningArgs) -> Vec<ToShell
                 },
             )));
         }
-    }
 
     responses
 }

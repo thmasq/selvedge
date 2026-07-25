@@ -1,4 +1,5 @@
 #![recursion_limit = "256"]
+#![allow(clippy::unused_async, clippy::too_many_lines, clippy::future_not_send)]
 
 mod actor;
 

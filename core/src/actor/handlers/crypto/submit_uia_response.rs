@@ -11,7 +11,7 @@ pub async fn run(actor: &MatrixActor, args: SubmitUiaResponseArgs) -> Vec<ToShel
         let identifier = matrix_sdk::ruma::api::client::uiaa::UserIdentifier::UserIdOrLocalpart(
             client
                 .user_id()
-                .map(|id| id.to_string())
+                .map(std::string::ToString::to_string)
                 .unwrap_or_default(),
         );
 
@@ -25,7 +25,7 @@ pub async fn run(actor: &MatrixActor, args: SubmitUiaResponseArgs) -> Vec<ToShel
             .bootstrap_cross_signing(Some(auth_data))
             .await
         {
-            Ok(_) => match client
+            Ok(()) => match client
                 .encryption()
                 .recovery()
                 .enable()

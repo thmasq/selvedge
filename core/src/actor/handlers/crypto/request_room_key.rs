@@ -24,7 +24,17 @@ pub async fn run(actor: &MatrixActor, args: RequestRoomKeyArgs) -> Vec<ToShell> 
                     }
                 }
 
-                if !target_devices.is_empty() {
+                if target_devices.is_empty() {
+                    vec![ToShell::Core(CoreEvents::CommandResult(
+                        CommandResultArgs {
+                            request_id: args.request_id,
+                            success: false,
+                            error: Some(ActorError::RoomOperationFailed(
+                                "No other verified devices found to request keys from.".into(),
+                            )),
+                        },
+                    ))]
+                } else {
                     let body = RequestedKeyInfo::new(
                         EventEncryptionAlgorithm::MegolmV1AesSha2,
                         args.room_id,
@@ -85,16 +95,6 @@ pub async fn run(actor: &MatrixActor, args: RequestRoomKeyArgs) -> Vec<ToShell> 
                             },
                         ))],
                     }
-                } else {
-                    vec![ToShell::Core(CoreEvents::CommandResult(
-                        CommandResultArgs {
-                            request_id: args.request_id,
-                            success: false,
-                            error: Some(ActorError::RoomOperationFailed(
-                                "No other verified devices found to request keys from.".into(),
-                            )),
-                        },
-                    ))]
                 }
             } else {
                 vec![ToShell::Core(CoreEvents::CommandResult(
