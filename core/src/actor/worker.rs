@@ -1,7 +1,8 @@
 use super::MatrixActor;
 use futures::{StreamExt, channel::mpsc};
 use gloo_worker::{HandlerId, Worker, WorkerScope};
-use selvedge_shared::message::{ToActor, ToShell};
+use selvedge_shared::event::ToShell;
+use selvedge_shared::message::ToActor;
 use std::cell::RefCell;
 use std::rc::Rc;
 use wasm_bindgen_futures::spawn_local;

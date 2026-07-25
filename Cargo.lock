@@ -3868,7 +3868,6 @@ dependencies = [
 name = "selvedge-core"
 version = "0.1.0"
 dependencies = [
- "ammonia",
  "console_error_panic_hook",
  "eyeball-im",
  "futures",
@@ -3882,6 +3881,7 @@ dependencies = [
  "matrix-sdk",
  "matrix-sdk-ui",
  "mime",
+ "paste",
  "pulldown-cmark",
  "ruma",
  "selvedge-shared",
@@ -3911,6 +3911,7 @@ dependencies = [
  "ammonia",
  "indexmap",
  "matrix-sdk",
+ "paste",
  "ruma",
  "serde",
  "thiserror 2.0.18",

@@ -7,3 +7,4 @@ extraEnv = { RUSTFLAGS = "-C target-feature=+simd128" }
 
 [language-server.rust-analyzer.config.check]
 command = "check"
+extraArgs = ["--release"]

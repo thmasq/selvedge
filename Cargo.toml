@@ -33,6 +33,7 @@ leptos = { version = "0.8.17", features = ["csr"] }
 matrix-sdk = { version = "0.16", default-features = false, features = ["js", "indexeddb", "e2e-encryption", "rustls-tls", "qrcode"] }
 matrix-sdk-ui = { version = "0.16.0", default-features = false, features = ["rustls-tls", "js"] }
 mime = "0.3.17"
+paste = "1.0.15"
 pulldown-cmark = "0.13.1"
 ruma = { version = "0.14.1", features = ["full"] }
 serde = { version = "1.0.228", features = ["derive"] }
