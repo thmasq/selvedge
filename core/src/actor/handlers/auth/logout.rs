@@ -20,14 +20,16 @@ pub async fn run(actor: &MatrixActor, args: LogoutArgs) -> Vec<ToShell> {
                 actor.active_sas_verifications.borrow_mut().clear();
                 actor.active_qr_verifications.borrow_mut().clear();
 
-                *actor.search_index.borrow_mut() = crate::actor::search::SearchIndex::default();
+                *actor.search_engine.borrow_mut() = crate::actor::search::SearchEngine::new();
                 let () = gloo_storage::LocalStorage::clear();
 
                 if let Some(window) = web_sys::window()
-                    && let Ok(Some(idb)) = window.indexed_db() {
-                        let _ = idb.delete_database("matrix-sdk-crypto");
-                        let _ = idb.delete_database("matrix-sdk-state");
-                    }
+                    && let Ok(Some(idb)) = window.indexed_db()
+                {
+                    let _ = idb.delete_database("matrix-sdk-crypto");
+                    let _ = idb.delete_database("matrix-sdk-state");
+                    let _ = idb.delete_database("selvedge_search_db");
+                }
 
                 vec![ToShell::Core(CoreEvents::CommandResult(
                     CommandResultArgs {

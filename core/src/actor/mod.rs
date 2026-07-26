@@ -16,7 +16,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use search::SearchIndex;
+use search::SearchEngine;
 use selvedge_shared::event::ToShell;
 
 pub struct MatrixActor {
@@ -25,7 +25,7 @@ pub struct MatrixActor {
     pub(crate) active_timelines: RefCell<HashMap<OwnedRoomId, Rc<Timeline>>>,
     pub(crate) active_sas_verifications: RefCell<HashMap<String, SasVerification>>,
     pub(crate) active_qr_verifications: RefCell<HashMap<String, QrVerification>>,
-    pub(crate) search_index: Rc<RefCell<SearchIndex>>,
+    pub(crate) search_engine: Rc<RefCell<SearchEngine>>,
 }
 
 impl MatrixActor {
@@ -36,7 +36,7 @@ impl MatrixActor {
             active_timelines: RefCell::new(HashMap::new()),
             active_sas_verifications: RefCell::new(HashMap::new()),
             active_qr_verifications: RefCell::new(HashMap::new()),
-            search_index: Rc::new(RefCell::new(SearchIndex::default())),
+            search_engine: Rc::new(RefCell::new(SearchEngine::new())),
         }
     }
 

@@ -12,7 +12,7 @@ use selvedge_shared::model::{DeliveryStatus, EncryptionStatus, EventItem, Timeli
 
 pub async fn run(actor: &MatrixActor, args: SearchMessagesArgs) -> Vec<ToShell> {
     let client_opt = actor.client.borrow().clone();
-    let search_index = actor.search_index.clone();
+    let search_engine = actor.search_engine.clone();
 
     let mut server_results: Option<Vec<EventItem>> = None;
 
@@ -89,8 +89,9 @@ pub async fn run(actor: &MatrixActor, args: SearchMessagesArgs) -> Vec<ToShell> 
     }
 
     let results = server_results.unwrap_or_else(|| {
-        search_index
+        search_engine
             .borrow()
+            .inner
             .search(args.room_id.as_ref(), &args.query, args.limit)
     });
 

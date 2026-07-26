@@ -1,5 +1,6 @@
 use super::MatrixActor;
 use futures::{StreamExt, channel::mpsc};
+use gloo_timers::callback::Interval;
 use gloo_worker::{HandlerId, Worker, WorkerScope};
 use selvedge_shared::event::ToShell;
 use selvedge_shared::message::ToActor;
@@ -10,6 +11,7 @@ use wasm_bindgen_futures::spawn_local;
 pub struct MatrixWorker {
     actor: Rc<MatrixActor>,
     bridge_id: Rc<RefCell<Option<HandlerId>>>,
+    _archive_timer: Interval,
 }
 
 impl Worker for MatrixWorker {
@@ -33,7 +35,24 @@ impl Worker for MatrixWorker {
             }
         });
 
-        Self { actor, bridge_id }
+        let search_engine_init = actor.search_engine.clone();
+        spawn_local(async move {
+            search_engine_init.borrow_mut().init_persistence().await;
+        });
+
+        let search_engine_archive = actor.search_engine.clone();
+        let archive_timer = Interval::new(5 * 60 * 1000, move || {
+            let engine = search_engine_archive.clone();
+            spawn_local(async move {
+                engine.borrow_mut().run_archiving_cycle().await;
+            });
+        });
+
+        Self {
+            actor,
+            bridge_id,
+            _archive_timer: archive_timer,
+        }
     }
 
     fn update(&mut self, _scope: &WorkerScope<Self>, _msg: Self::Message) {}
