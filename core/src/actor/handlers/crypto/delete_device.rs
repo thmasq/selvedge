@@ -11,18 +11,7 @@ pub async fn run(actor: &MatrixActor, args: DeleteDeviceArgs) -> Vec<ToShell> {
     let client = actor.client.borrow().clone();
     if let Some(client) = client {
         let auth_data = if let (Some(session), Some(pass)) = (args.uia_session, args.password) {
-            let identifier = matrix_sdk::ruma::api::client::uiaa::UserIdentifier::UserIdOrLocalpart(
-                client
-                    .user_id()
-                    .map(std::string::ToString::to_string)
-                    .unwrap_or_default(),
-            );
-            let mut uiaa_password =
-                matrix_sdk::ruma::api::client::uiaa::Password::new(identifier, pass);
-            uiaa_password.session = Some(session);
-            Some(matrix_sdk::ruma::api::client::uiaa::AuthData::Password(
-                uiaa_password,
-            ))
+            actor.build_uiaa_auth_data(session, pass)
         } else {
             None
         };
@@ -47,12 +36,13 @@ pub async fn run(actor: &MatrixActor, args: DeleteDeviceArgs) -> Vec<ToShell> {
             ))],
             Err(e) => {
                 if let Some(uiaa_info) = e.as_uiaa_response()
-                    && let Some(session) = &uiaa_info.session {
-                        return vec![ToShell::Crypto(CryptoEvents::UiaaPrompt(UiaaPromptArgs {
-                            request_id: args.request_id,
-                            session: session.clone(),
-                        }))];
-                    }
+                    && let Some(session) = &uiaa_info.session
+                {
+                    return vec![ToShell::Crypto(CryptoEvents::UiaaPrompt(UiaaPromptArgs {
+                        request_id: args.request_id,
+                        session: session.clone(),
+                    }))];
+                }
                 vec![ToShell::Core(CoreEvents::CommandResult(
                     CommandResultArgs {
                         request_id: args.request_id,

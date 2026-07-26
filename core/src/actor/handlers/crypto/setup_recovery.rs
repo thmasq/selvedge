@@ -10,6 +10,26 @@ use selvedge_shared::model::ActorError;
 pub async fn run(actor: &MatrixActor, args: SetupRecoveryArgs) -> Vec<ToShell> {
     let client = actor.client.borrow().clone();
     if let Some(client) = client {
+        if let (Some(session), Some(pass)) = (args.uia_session, args.uia_password) {
+            if let Some(auth_data) = actor.build_uiaa_auth_data(session, pass) {
+                if let Err(e) = client
+                    .encryption()
+                    .bootstrap_cross_signing(Some(auth_data))
+                    .await
+                {
+                    return vec![ToShell::Core(CoreEvents::CommandResult(
+                        CommandResultArgs {
+                            request_id: args.request_id,
+                            success: false,
+                            error: Some(ActorError::RoomOperationFailed(format!(
+                                "UIA Bootstrap failed: {e}"
+                            ))),
+                        },
+                    ))];
+                }
+            }
+        }
+
         match client
             .encryption()
             .recovery()
@@ -30,14 +50,14 @@ pub async fn run(actor: &MatrixActor, args: SetupRecoveryArgs) -> Vec<ToShell> {
             Err(e) => {
                 if let matrix_sdk::encryption::recovery::RecoveryError::Sdk(sdk_err) = &e
                     && let Some(uiaa_info) = sdk_err.as_uiaa_response()
-                        && let Some(session) = &uiaa_info.session {
-                            return vec![ToShell::Crypto(CryptoEvents::UiaaPrompt(
-                                UiaaPromptArgs {
-                                    request_id: args.request_id,
-                                    session: session.clone(),
-                                },
-                            ))];
-                        }
+                    && let Some(session) = &uiaa_info.session
+                {
+                    return vec![ToShell::Crypto(CryptoEvents::UiaaPrompt(UiaaPromptArgs {
+                        request_id: args.request_id,
+                        session: session.clone(),
+                    }))];
+                }
+
                 vec![ToShell::Core(CoreEvents::CommandResult(
                     CommandResultArgs {
                         request_id: args.request_id,

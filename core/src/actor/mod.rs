@@ -4,6 +4,7 @@ pub mod mapping;
 pub mod search;
 pub mod worker;
 
+use matrix_sdk::ruma::api::client::uiaa::{AuthData, Password, UserIdentifier};
 pub use worker::MatrixWorker;
 
 use futures::channel::mpsc;
@@ -37,6 +38,24 @@ impl MatrixActor {
             active_qr_verifications: RefCell::new(HashMap::new()),
             search_index: Rc::new(RefCell::new(SearchIndex::default())),
         }
+    }
+
+    pub(crate) fn build_uiaa_auth_data(
+        &self,
+        session: String,
+        password: String,
+    ) -> Option<AuthData> {
+        let client = self.client.borrow().clone()?;
+        let identifier = UserIdentifier::UserIdOrLocalpart(
+            client
+                .user_id()
+                .map(|id| id.to_string())
+                .unwrap_or_default(),
+        );
+        let mut uiaa_password = Password::new(identifier, password);
+        uiaa_password.session = Some(session);
+
+        Some(AuthData::Password(uiaa_password))
     }
 
     pub(crate) fn send_event(&self, event: ToShell) {
