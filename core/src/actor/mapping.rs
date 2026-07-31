@@ -181,9 +181,9 @@ pub async fn map_timeline_diff(
 pub async fn room_list_item_to_view(client: Client, item: RoomListItem) -> RoomListEntryView {
     let unread = item.unread_notification_counts();
 
-    let last_activity = item
-        .latest_event()
-        .and_then(|e| e.event().timestamp())
+    let last_activity = client
+        .get_room(item.room_id())
+        .and_then(|room| room.latest_event_timestamp())
         .unwrap_or_else(|| MilliSecondsSinceUnixEpoch(0u32.into()));
 
     let room = client.get_room(item.room_id());

@@ -1,4 +1,7 @@
 use crate::actor::MatrixActor;
+use matrix_sdk::ruma::api::client::uiaa::{
+    AuthData, MatrixUserIdentifier, Password, UserIdentifier,
+};
 use selvedge_shared::event::ToShell;
 use selvedge_shared::event::core::CoreEvents;
 use selvedge_shared::event::core::command_result::CommandResultArgs;
@@ -8,17 +11,16 @@ use selvedge_shared::model::ActorError;
 pub async fn run(actor: &MatrixActor, args: SubmitUiaResponseArgs) -> Vec<ToShell> {
     let client = actor.client.borrow().clone();
     if let Some(client) = client {
-        let identifier = matrix_sdk::ruma::api::client::uiaa::UserIdentifier::UserIdOrLocalpart(
+        let identifier = UserIdentifier::Matrix(MatrixUserIdentifier::new(
             client
                 .user_id()
-                .map(std::string::ToString::to_string)
+                .map(|id| id.to_string())
                 .unwrap_or_default(),
-        );
+        ));
 
-        let mut uiaa_password =
-            matrix_sdk::ruma::api::client::uiaa::Password::new(identifier, args.password);
+        let mut uiaa_password = Password::new(identifier, args.password);
         uiaa_password.session = Some(args.session);
-        let auth_data = matrix_sdk::ruma::api::client::uiaa::AuthData::Password(uiaa_password);
+        let auth_data = AuthData::Password(uiaa_password);
 
         match client
             .encryption()

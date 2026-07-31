@@ -5,7 +5,9 @@ pub mod queue;
 pub mod search;
 pub mod worker;
 
-use matrix_sdk::ruma::api::client::uiaa::{AuthData, Password, UserIdentifier};
+use matrix_sdk::ruma::api::client::uiaa::{
+    AuthData, MatrixUserIdentifier, Password, UserIdentifier,
+};
 pub use worker::MatrixWorker;
 
 use futures::channel::mpsc;
@@ -50,12 +52,12 @@ impl MatrixActor {
         password: String,
     ) -> Option<AuthData> {
         let client = self.client.borrow().clone()?;
-        let identifier = UserIdentifier::UserIdOrLocalpart(
+        let identifier = UserIdentifier::Matrix(MatrixUserIdentifier::new(
             client
                 .user_id()
                 .map(|id| id.to_string())
                 .unwrap_or_default(),
-        );
+        ));
         let mut uiaa_password = Password::new(identifier, password);
         uiaa_password.session = Some(session);
 
