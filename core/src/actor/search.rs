@@ -311,6 +311,40 @@ impl SearchIndex {
             let _ = self.archive_writer.commit();
         }
     }
+
+    /// Physically removes a document from both tiers
+    pub(crate) fn delete_item(&mut self, event_id: &matrix_sdk::ruma::OwnedEventId) {
+        let term = tantivy::Term::from_field_text(self.event_id_field, event_id.as_str());
+        let query = tantivy::query::TermQuery::new(term, tantivy::schema::IndexRecordOption::Basic);
+
+        let _ = self.hot_writer.delete_query(Box::new(query.clone()));
+        let _ = self.hot_writer.commit();
+
+        let _ = self.archive_writer.delete_query(Box::new(query));
+        let _ = self.archive_writer.commit();
+    }
+
+    /// Deletes the old version (if any) and indexes the new one
+    pub(crate) fn upsert_item(&mut self, room_id: &OwnedRoomId, item: &TimelineItem) {
+        if let TimelineItem::Event(event_item) = item {
+            self.delete_item(&event_item.event_id);
+
+            if let TimelineContent::Message(MessageContent::Text { body, .. }) =
+                &*event_item.content
+            {
+                self.hot_writer
+                    .add_document(doc!(
+                        self.body_field => body.clone(),
+                        self.event_id_field => event_item.event_id.to_string(),
+                        self.room_id_field => room_id.to_string(),
+                        self.timestamp_field => u64::from(event_item.timestamp.0),
+                        self.sender_field => event_item.sender.to_string()
+                    ))
+                    .unwrap();
+                let _ = self.hot_writer.commit();
+            }
+        }
+    }
 }
 
 impl SearchEngine {
@@ -347,9 +381,9 @@ impl SearchEngine {
         }
     }
 
-    /// Indexes a new item in RAM immediately, and safely appends it to the WAL in the background.
-    pub async fn index_live_event(&mut self, room_id: &OwnedRoomId, item: &TimelineItem) {
-        self.inner.index_item(room_id, item);
+    /// Upserts an item in RAM, and safely appends it to the WAL in the background.
+    pub async fn upsert_live_event(&mut self, room_id: &OwnedRoomId, item: &TimelineItem) {
+        self.inner.upsert_item(room_id, item);
 
         if let Some(db) = &self.db {
             if let TimelineItem::Event(event_item) = item {

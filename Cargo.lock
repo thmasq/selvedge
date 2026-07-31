@@ -4235,6 +4235,7 @@ dependencies = [
  "serde_json",
  "tantivy",
  "thiserror 2.0.19",
+ "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

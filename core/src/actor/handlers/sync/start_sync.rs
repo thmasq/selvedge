@@ -5,7 +5,6 @@ use matrix_sdk::ruma::events::ToDeviceEvent;
 use matrix_sdk::ruma::events::key::verification::done::ToDeviceKeyVerificationDoneEventContent;
 use matrix_sdk::ruma::events::key::verification::request::ToDeviceKeyVerificationRequestEventContent;
 use matrix_sdk::ruma::events::receipt::{ReceiptType, SyncReceiptEvent};
-use matrix_sdk::ruma::events::room::message::SyncRoomMessageEvent;
 use matrix_sdk::ruma::events::room_key_request::{Action, ToDeviceRoomKeyRequestEventContent};
 use matrix_sdk::ruma::events::typing::SyncTypingEvent;
 use matrix_sdk::ruma::presence::PresenceState;
@@ -24,7 +23,6 @@ use selvedge_shared::event::room::profiles_fetched::ProfilesFetchedArgs;
 use selvedge_shared::event::room::room_list_diff::RoomListDiffArgs;
 use selvedge_shared::event::room::typing_updated::TypingUpdatedArgs;
 use selvedge_shared::message::sync::start_sync::StartSyncArgs;
-use selvedge_shared::model::TimelineContent;
 use selvedge_shared::{MemberProfile, model::ActorError, model::VerificationState};
 
 use std::collections::HashMap;
@@ -205,51 +203,6 @@ pub async fn run(actor: &MatrixActor, _args: StartSyncArgs) -> Vec<ToShell> {
                 }
             },
         );
-
-        let search_engine_for_sync = actor.search_engine.clone();
-
-        client.add_event_handler(move |ev: SyncRoomMessageEvent, room: Room| {
-            let search_engine = search_engine_for_sync.clone();
-            async move {
-                if let SyncRoomMessageEvent::Original(orig) = ev {
-                    if matches!(
-                        &orig.content.msgtype,
-                        matrix_sdk::ruma::events::room::message::MessageType::Text(_)
-                    ) {
-                        let room_id = room.room_id().to_owned();
-
-                        let content = Box::new(TimelineContent::from(orig.content));
-
-                        let event_item = selvedge_shared::model::EventItem {
-                            event_id: orig.event_id,
-                            sender: orig.sender,
-                            sender_profile: None,
-                            timestamp: orig.origin_server_ts,
-                            content,
-                            reactions: indexmap::IndexMap::new(),
-                            read_receipts: Vec::new(),
-                            delivery_status: selvedge_shared::model::DeliveryStatus::Synced,
-                            in_reply_to: None,
-                            reply_details: None,
-                            is_edited: false,
-                            latest_edit: None,
-                            thread_root_id: None,
-                            is_highlight: false,
-                            should_group: false,
-                            encryption_status: selvedge_shared::model::EncryptionStatus::Verified,
-                        };
-
-                        let timeline_item =
-                            selvedge_shared::model::TimelineItem::Event(Box::new(event_item));
-
-                        search_engine
-                            .borrow_mut()
-                            .index_live_event(&room_id, &timeline_item)
-                            .await;
-                    }
-                }
-            }
-        });
 
         spawn_local(async move {
             match RoomListService::new(client.clone()).await {

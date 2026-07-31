@@ -87,22 +87,38 @@ pub async fn run(actor: &MatrixActor, args: OpenRoomArgs) -> Vec<ToShell> {
 
                         match &mapped_diff {
                             TimelineDiff::Append { entries } | TimelineDiff::Reset { entries } => {
-                                let mut idx = search_engine.borrow_mut();
-                                for entry in entries {
-                                    idx.inner.index_item(&stream_room_id, entry);
-                                }
+                                let search_engine = search_engine.clone();
+                                let stream_room_id = stream_room_id.clone();
+                                let entries = entries.clone();
+
+                                spawn_local(async move {
+                                    for entry in &entries {
+                                        search_engine
+                                            .borrow_mut()
+                                            .upsert_live_event(&stream_room_id, entry)
+                                            .await;
+                                    }
+                                });
                             }
                             TimelineDiff::PushFront { entry }
                             | TimelineDiff::PushBack { entry }
                             | TimelineDiff::Insert { entry, .. }
                             | TimelineDiff::Set { entry, .. } => {
-                                search_engine
-                                    .borrow_mut()
-                                    .inner
-                                    .index_item(&stream_room_id, entry);
+                                let search_engine = search_engine.clone();
+                                let stream_room_id = stream_room_id.clone();
+                                let entry = entry.clone();
+
+                                spawn_local(async move {
+                                    search_engine
+                                        .borrow_mut()
+                                        .upsert_live_event(&stream_room_id, &entry)
+                                        .await;
+                                });
                             }
+                            TimelineDiff::Remove { index: _ } => {}
                             _ => {}
                         }
+
                         mapped_diffs.push(mapped_diff);
                     }
                     let _ = sender.unbounded_send(ToShell::Room(RoomEvents::TimelineDiff(

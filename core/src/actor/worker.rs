@@ -35,6 +35,11 @@ impl Worker for MatrixWorker {
             }
         });
 
+        let queue_manager_init = actor.queue_manager.clone();
+        spawn_local(async move {
+            queue_manager_init.borrow_mut().init_persistence().await;
+        });
+
         let search_engine_init = actor.search_engine.clone();
         spawn_local(async move {
             search_engine_init.borrow_mut().init_persistence().await;

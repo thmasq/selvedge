@@ -88,12 +88,25 @@ pub async fn run(actor: &MatrixActor, args: SearchMessagesArgs) -> Vec<ToShell> 
         }
     }
 
-    let results = server_results.unwrap_or_else(|| {
+    let local_results =
         search_engine
             .borrow()
             .inner
-            .search(args.room_id.as_ref(), &args.query, args.limit)
-    });
+            .search(args.room_id.as_ref(), &args.query, args.limit);
+
+    let mut results = local_results;
+
+    if let Some(server) = server_results {
+        let mut seen_ids: std::collections::HashSet<_> =
+            results.iter().map(|item| item.event_id.clone()).collect();
+
+        for srv_item in server {
+            if !seen_ids.contains(&srv_item.event_id) {
+                seen_ids.insert(srv_item.event_id.clone());
+                results.push(srv_item);
+            }
+        }
+    }
 
     vec![ToShell::Core(CoreEvents::SearchResults(
         SearchResultsArgs {
