@@ -186,9 +186,13 @@ pub async fn room_list_item_to_view(client: Client, item: RoomListItem) -> RoomL
         .and_then(|e| e.event().timestamp())
         .unwrap_or_else(|| MilliSecondsSinceUnixEpoch(0u32.into()));
 
-    let is_encrypted = client
-        .get_room(item.room_id())
-        .is_some_and(|room| room.encryption_state().is_encrypted());
+    let room = client.get_room(item.room_id());
+
+    let receipts = item.read_receipts();
+
+    let is_encrypted = room
+        .as_ref()
+        .is_some_and(|r| r.encryption_state().is_encrypted());
 
     let summary = RoomSummary {
         room_id: item.room_id().to_owned(),
@@ -196,7 +200,7 @@ pub async fn room_list_item_to_view(client: Client, item: RoomListItem) -> RoomL
         avatar_url: item.avatar_url(),
         notification_count: unread.notification_count,
         highlight_count: unread.highlight_count,
-        unread_count: 0,
+        unread_count: receipts.num_unread,
         is_direct: item.is_direct().await.unwrap_or(false),
         last_message_preview: None,
         last_activity,
