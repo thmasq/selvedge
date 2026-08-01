@@ -20,6 +20,13 @@ macro_rules! define_message_group {
                     [<$mod_name:camel>]( $mod_name::[<$mod_name:camel Args>] ),
                 )*
             }
+
+            #[macro_export]
+            macro_rules! [<$group_name:snake _message_modules>] {
+                ($callback:path) => {
+                    $callback! { $group_name => [ $( $mod_name ),* ] }
+                };
+            }
         }
     };
 }
@@ -43,6 +50,13 @@ macro_rules! define_top_level_messages {
                 $(
                     [<$mod_name:camel>]($mod_name::[<$mod_name:camel Messages>]),
                 )*
+            }
+
+            #[macro_export]
+            macro_rules! top_level_message_modules {
+                ($callback:path) => {
+                    $callback! { [ $( $mod_name ),* ] }
+                };
             }
         }
     };
@@ -70,6 +84,13 @@ macro_rules! define_event_group {
                     [<$mod_name:camel>]( $mod_name::[<$mod_name:camel Args>] ),
                 )*
             }
+
+            #[macro_export]
+            macro_rules! [<$group_name:snake _event_modules>] {
+                ($callback:path) => {
+                    $callback! { $group_name => [ $( $mod_name ),* ] }
+                };
+            }
         }
     };
 }
@@ -93,6 +114,13 @@ macro_rules! define_top_level_events {
                 $(
                     [<$mod_name:camel>]($mod_name::[<$mod_name:camel Events>]),
                 )*
+            }
+
+            #[macro_export]
+            macro_rules! top_level_event_modules {
+                ($callback:path) => {
+                    $callback! { [ $( $mod_name ),* ] }
+                };
             }
         }
     };
