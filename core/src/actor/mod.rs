@@ -5,6 +5,7 @@ pub mod queue;
 pub mod search;
 pub mod worker;
 
+use futures::lock::Mutex;
 use matrix_sdk::ruma::api::client::uiaa::{
     AuthData, MatrixUserIdentifier, Password, UserIdentifier,
 };
@@ -29,8 +30,8 @@ pub struct MatrixActor {
     pub(crate) active_timelines: RefCell<HashMap<OwnedRoomId, Rc<Timeline>>>,
     pub(crate) active_sas_verifications: RefCell<HashMap<String, SasVerification>>,
     pub(crate) active_qr_verifications: RefCell<HashMap<String, QrVerification>>,
-    pub(crate) search_engine: Rc<RefCell<SearchEngine>>,
-    pub(crate) queue_manager: Rc<RefCell<QueueManager>>,
+    pub(crate) search_engine: Rc<Mutex<SearchEngine>>,
+    pub(crate) queue_manager: Rc<Mutex<QueueManager>>,
 }
 
 impl MatrixActor {
@@ -41,8 +42,8 @@ impl MatrixActor {
             active_timelines: RefCell::new(HashMap::new()),
             active_sas_verifications: RefCell::new(HashMap::new()),
             active_qr_verifications: RefCell::new(HashMap::new()),
-            search_engine: Rc::new(RefCell::new(SearchEngine::new())),
-            queue_manager: Rc::new(RefCell::new(QueueManager::new())),
+            search_engine: Rc::new(futures::lock::Mutex::new(SearchEngine::new())),
+            queue_manager: Rc::new(futures::lock::Mutex::new(QueueManager::new())),
         }
     }
 
@@ -55,7 +56,7 @@ impl MatrixActor {
         let identifier = UserIdentifier::Matrix(MatrixUserIdentifier::new(
             client
                 .user_id()
-                .map(|id| id.to_string())
+                .map(std::string::ToString::to_string)
                 .unwrap_or_default(),
         ));
         let mut uiaa_password = Password::new(identifier, password);

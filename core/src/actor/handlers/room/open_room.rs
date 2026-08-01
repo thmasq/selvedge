@@ -56,7 +56,8 @@ pub async fn run(actor: &MatrixActor, args: OpenRoomArgs) -> Vec<ToShell> {
                 let mapped = map_timeline_item_safe(&client, &i).await;
                 actor
                     .search_engine
-                    .borrow_mut()
+                    .lock()
+                    .await
                     .inner
                     .index_item(&args.room_id, &mapped);
                 initial_views.push(mapped);
@@ -94,7 +95,8 @@ pub async fn run(actor: &MatrixActor, args: OpenRoomArgs) -> Vec<ToShell> {
                                 spawn_local(async move {
                                     for entry in &entries {
                                         search_engine
-                                            .borrow_mut()
+                                            .lock()
+                                            .await
                                             .upsert_live_event(&stream_room_id, entry)
                                             .await;
                                     }
@@ -110,11 +112,13 @@ pub async fn run(actor: &MatrixActor, args: OpenRoomArgs) -> Vec<ToShell> {
 
                                 spawn_local(async move {
                                     search_engine
-                                        .borrow_mut()
+                                        .lock()
+                                        .await
                                         .upsert_live_event(&stream_room_id, &entry)
                                         .await;
                                 });
                             }
+                            #[allow(clippy::match_same_arms)]
                             TimelineDiff::Remove { index: _ } => {}
                             _ => {}
                         }

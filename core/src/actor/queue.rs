@@ -10,7 +10,6 @@ use rexie::{ObjectStore, Rexie, TransactionMode};
 use selvedge_shared::model::MessageContent;
 use serde::{Deserialize, Serialize};
 use std::{
-    cell::RefCell,
     collections::{HashMap, VecDeque},
     rc::Rc,
 };
@@ -52,7 +51,7 @@ pub struct RoomQueueState {
 }
 
 impl RoomQueueState {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             tasks: VecDeque::new(),
             failures: 0,
@@ -62,11 +61,8 @@ impl RoomQueueState {
     }
 
     pub fn is_in_backoff(&self) -> bool {
-        if let Some(until) = self.backoff_until {
-            js_sys::Date::now() < until
-        } else {
-            false
-        }
+        self.backoff_until
+            .is_some_and(|until| js_sys::Date::now() < until)
     }
 }
 
@@ -85,7 +81,7 @@ impl QueueManager {
         }
     }
 
-    pub async fn init_persistence(&mut self) {
+    pub async fn init_persistence(manager: Rc<futures::lock::Mutex<Self>>) {
         let db_result = Rexie::builder("selvedge_queue_db")
             .version(1)
             .add_object_store(ObjectStore::new("outbound_tasks").key_path("id"))
@@ -94,31 +90,34 @@ impl QueueManager {
 
         match db_result {
             Ok(db) => {
-                if let Ok(tx) = db.transaction(&["outbound_tasks"], TransactionMode::ReadOnly) {
-                    if let Ok(store) = tx.store("outbound_tasks") {
-                        if let Ok(all_tasks) = store.get_all(None, None).await {
-                            for val in all_tasks {
-                                if let Ok(task) =
-                                    serde_wasm_bindgen::from_value::<OutboundTask>(val)
-                                {
-                                    let state = self
-                                        .queues
-                                        .entry(task.room_id.clone())
-                                        .or_insert_with(RoomQueueState::new);
-                                    state.tasks.push_back(task);
-                                }
-                            }
+                let mut loaded_tasks = Vec::new();
+
+                if let Ok(tx) = db.transaction(&["outbound_tasks"], TransactionMode::ReadOnly)
+                    && let Ok(store) = tx.store("outbound_tasks")
+                    && let Ok(all_tasks) = store.get_all(None, None).await
+                {
+                    for val in all_tasks {
+                        if let Ok(task) = serde_wasm_bindgen::from_value::<OutboundTask>(val) {
+                            loaded_tasks.push(task);
                         }
                     }
                 }
-                self.db = Some(db);
+
+                let mut this = manager.lock().await;
+                for task in loaded_tasks {
+                    let state = this
+                        .queues
+                        .entry(task.room_id.clone())
+                        .or_insert_with(RoomQueueState::new);
+                    state.tasks.push_back(task);
+                }
+                this.db = Some(db);
             }
             Err(e) => {
                 web_sys::console::warn_1(&JsValue::from_str(&format!(
-                    "Queue persistence disabled: {:?}",
-                    e
+                    "Queue persistence disabled: {e:?}"
                 )));
-                self.db = None;
+                manager.lock().await.db = None;
             }
         }
     }
@@ -128,15 +127,15 @@ impl QueueManager {
             task.id = uuid::Uuid::new_v4().to_string();
         }
 
-        if let Some(db) = &self.db {
-            if let Ok(tx) = db.transaction(&["outbound_tasks"], TransactionMode::ReadWrite) {
-                if let Ok(store) = tx.store("outbound_tasks") {
-                    if let Ok(js_value) = serde_wasm_bindgen::to_value(&task) {
-                        let _ = store.add(&js_value, None).await;
-                    }
-                }
-                let _ = tx.done().await;
+        if let Some(db) = &self.db
+            && let Ok(tx) = db.transaction(&["outbound_tasks"], TransactionMode::ReadWrite)
+        {
+            if let Ok(store) = tx.store("outbound_tasks")
+                && let Ok(js_value) = serde_wasm_bindgen::to_value(&task)
+            {
+                let _ = store.add(&js_value, None).await;
             }
+            let _ = tx.done().await;
         }
 
         let state = self
@@ -147,46 +146,48 @@ impl QueueManager {
     }
 
     pub async fn remove_from_db(&self, id: &str) {
-        if let Some(db) = &self.db {
-            if let Ok(tx) = db.transaction(&["outbound_tasks"], TransactionMode::ReadWrite) {
-                if let Ok(store) = tx.store("outbound_tasks") {
-                    let key = JsValue::from_str(id);
-                    let _ = store.delete(key).await;
-                }
-                let _ = tx.done().await;
+        if let Some(db) = &self.db
+            && let Ok(tx) = db.transaction(&["outbound_tasks"], TransactionMode::ReadWrite)
+        {
+            if let Ok(store) = tx.store("outbound_tasks") {
+                let key = JsValue::from_str(id);
+                let _ = store.delete(key).await;
             }
+            let _ = tx.done().await;
         }
     }
 
-    pub fn poke(manager: Rc<RefCell<QueueManager>>, room_id: &OwnedRoomId) {
-        let mut mgr = manager.borrow_mut();
-
-        let client = match &mgr.client {
-            Some(c) => c.clone(),
-            None => return,
-        };
-
-        let state = match mgr.queues.get_mut(room_id) {
-            Some(s) => s,
-            None => return,
-        };
-
-        if state.is_sending || state.is_in_backoff() || state.tasks.is_empty() {
-            return;
-        }
-
-        state.is_sending = true;
-
-        let task = state.tasks.front().unwrap().clone();
+    pub fn poke(manager: Rc<futures::lock::Mutex<Self>>, room_id: &OwnedRoomId) {
         let r_id = room_id.clone();
-        let manager_clone = manager.clone();
-
         spawn_local(async move {
+            let mut mgr = manager.lock().await;
+
+            let client = match &mgr.client {
+                Some(c) => c.clone(),
+                None => return,
+            };
+
+            let Some(state) = mgr.queues.get_mut(&r_id) else {
+                return;
+            };
+
+            if state.is_sending || state.is_in_backoff() || state.tasks.is_empty() {
+                return;
+            }
+
+            state.is_sending = true;
+
+            let task = state.tasks.front().unwrap().clone();
+            let manager_clone = manager.clone();
+
+            drop(mgr);
+
             let success = Self::execute_task(&client, &task).await;
 
-            let mut mgr = manager_clone.borrow_mut();
+            let mut mgr = manager_clone.lock().await;
+
+            let state = mgr.queues.get_mut(&r_id).unwrap();
             if success {
-                let state = mgr.queues.get_mut(&r_id).unwrap();
                 state.tasks.pop_front();
                 state.failures = 0;
                 state.is_sending = false;
@@ -194,14 +195,13 @@ impl QueueManager {
                 let mgr_for_db = manager_clone.clone();
                 let task_id = task.id.clone();
                 spawn_local(async move {
-                    mgr_for_db.borrow().remove_from_db(&task_id).await;
+                    mgr_for_db.lock().await.remove_from_db(&task_id).await;
                 });
 
                 drop(mgr);
 
-                QueueManager::poke(manager_clone, &r_id);
+                Self::poke(manager_clone, &r_id);
             } else {
-                let state = mgr.queues.get_mut(&r_id).unwrap();
                 state.failures += 1;
                 state.is_sending = false;
 
@@ -210,14 +210,14 @@ impl QueueManager {
                     delay_ms = 60000;
                 }
 
-                state.backoff_until = Some(js_sys::Date::now() + (delay_ms as f64));
+                state.backoff_until = Some(js_sys::Date::now() + f64::from(delay_ms));
                 drop(mgr);
 
                 let r_id_clone = r_id.clone();
                 let manager_timeout = manager_clone.clone();
 
                 Timeout::new(delay_ms, move || {
-                    QueueManager::poke(manager_timeout, &r_id_clone);
+                    Self::poke(manager_timeout, &r_id_clone);
                 })
                 .forget();
             }
@@ -225,9 +225,8 @@ impl QueueManager {
     }
 
     async fn execute_task(client: &matrix_sdk::Client, task: &OutboundTask) -> bool {
-        let room = match client.get_room(&task.room_id) {
-            Some(r) => r,
-            None => return false, // Room doesn't exist locally yet
+        let Some(room) = client.get_room(&task.room_id) else {
+            return false;
         };
 
         match &task.payload {

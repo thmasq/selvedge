@@ -90,7 +90,8 @@ pub async fn run(actor: &MatrixActor, args: SearchMessagesArgs) -> Vec<ToShell> 
 
     let local_results =
         search_engine
-            .borrow()
+            .lock()
+            .await
             .inner
             .search(args.room_id.as_ref(), &args.query, args.limit);
 

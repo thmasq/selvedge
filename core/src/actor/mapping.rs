@@ -131,7 +131,7 @@ fn extract_reactions(
         let count = users.len() as u64;
         let me_reacted = client
             .user_id()
-            .map_or(false, |my_id| users.contains_key(my_id));
+            .is_some_and(|my_id| users.contains_key(my_id));
 
         reactions.insert(
             emoji.clone(),
@@ -229,7 +229,10 @@ async fn map_event_item(client: &Client, event: &EventTimelineItem) -> EventItem
     };
 
     let encryption_status = compute_encryption_status(event);
-    let is_edited = event.content().as_message().is_some_and(|m| m.is_edited());
+    let is_edited = event
+        .content()
+        .as_message()
+        .is_some_and(matrix_sdk_ui::timeline::Message::is_edited);
 
     EventItem {
         event_id,
@@ -251,7 +254,7 @@ async fn map_event_item(client: &Client, event: &EventTimelineItem) -> EventItem
     }
 }
 
-fn map_virtual_item(virt: &VirtualTimelineItem) -> VirtualItem {
+const fn map_virtual_item(virt: &VirtualTimelineItem) -> VirtualItem {
     match virt {
         VirtualTimelineItem::DateDivider(ts) => VirtualItem::DayDivider {
             ts: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch(ts.0),
@@ -322,7 +325,7 @@ fn compute_last_activity(client: &Client, item: &RoomListItem) -> MilliSecondsSi
         .unwrap_or_else(|| MilliSecondsSinceUnixEpoch(0u32.into()))
 }
 
-fn is_room_encrypted(room: &Option<matrix_sdk::Room>) -> bool {
+fn is_room_encrypted(room: Option<&matrix_sdk::Room>) -> bool {
     room.as_ref()
         .is_some_and(|r| r.encryption_state().is_encrypted())
 }
@@ -332,7 +335,7 @@ async fn build_room_summary(client: &Client, item: &RoomListItem) -> RoomSummary
     let last_activity = compute_last_activity(client, item);
     let room = client.get_room(item.room_id());
     let receipts = item.read_receipts();
-    let is_encrypted = is_room_encrypted(&room);
+    let is_encrypted = is_room_encrypted(room.as_ref());
 
     RoomSummary {
         room_id: item.room_id().to_owned(),

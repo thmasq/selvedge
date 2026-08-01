@@ -37,19 +37,19 @@ impl Worker for MatrixWorker {
 
         let queue_manager_init = actor.queue_manager.clone();
         spawn_local(async move {
-            queue_manager_init.borrow_mut().init_persistence().await;
+            crate::actor::queue::QueueManager::init_persistence(queue_manager_init).await;
         });
 
         let search_engine_init = actor.search_engine.clone();
         spawn_local(async move {
-            search_engine_init.borrow_mut().init_persistence().await;
+            crate::actor::search::SearchEngine::init_persistence(search_engine_init).await;
         });
 
         let search_engine_archive = actor.search_engine.clone();
         let archive_timer = Interval::new(5 * 60 * 1000, move || {
             let engine = search_engine_archive.clone();
             spawn_local(async move {
-                engine.borrow_mut().run_archiving_cycle().await;
+                crate::actor::search::SearchEngine::run_archiving_cycle(engine).await;
             });
         });
 

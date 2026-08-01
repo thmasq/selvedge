@@ -17,7 +17,7 @@ use std::cell::RefCell;
 use std::str::FromStr;
 
 thread_local! {
-    static UPLOAD_LIMIT: RefCell<Option<u64>> = RefCell::new(None);
+    static UPLOAD_LIMIT: RefCell<Option<u64>> = const { RefCell::new(None) };
 }
 
 pub async fn run(actor: &MatrixActor, args: SendMediaArgs) -> Vec<ToShell> {
@@ -37,13 +37,11 @@ pub async fn run(actor: &MatrixActor, args: SendMediaArgs) -> Vec<ToShell> {
                 // Fallback for older homeservers
                 #[allow(deprecated)]
                 let legacy_req = LegacyMediaRequest::new();
-                if let Ok(res) = client.send(legacy_req).await {
+                client.send(legacy_req).await.map_or(u64::MAX, |res| {
                     let size = u64::from(res.upload_size);
                     UPLOAD_LIMIT.with(|l| *l.borrow_mut() = Some(size));
                     size
-                } else {
-                    u64::MAX
-                }
+                })
             }
         };
 
@@ -71,33 +69,45 @@ pub async fn run(actor: &MatrixActor, args: SendMediaArgs) -> Vec<ToShell> {
             if let Ok(mime) = mime::Mime::from_str(&args.mime_type) {
                 let width = args.width.map(Into::into);
                 let height = args.height.map(Into::into);
+                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
                 let size = Some((args.data.len() as u32).into());
 
+                #[allow(clippy::needless_update)]
                 let info = match mime.type_() {
                     mime::IMAGE => {
-                        let mut info = BaseImageInfo::default();
-                        info.width = width;
-                        info.height = height;
-                        info.size = size;
-                        info.blurhash = args.blurhash;
+                        let info = BaseImageInfo {
+                            width,
+                            height,
+                            size,
+                            blurhash: args.blurhash,
+                            ..Default::default()
+                        };
                         AttachmentInfo::Image(info)
                     }
                     mime::VIDEO => {
-                        let mut info = BaseVideoInfo::default();
-                        info.width = width;
-                        info.height = height;
-                        info.size = size;
-                        info.blurhash = args.blurhash;
+                        let info = BaseVideoInfo {
+                            width,
+                            height,
+                            size,
+                            blurhash: args.blurhash,
+                            ..Default::default()
+                        };
                         AttachmentInfo::Video(info)
                     }
                     mime::AUDIO => {
-                        let mut info = BaseAudioInfo::default();
-                        info.size = size;
+                        let info = BaseAudioInfo {
+                            size,
+                            ..Default::default()
+                        };
+
                         AttachmentInfo::Audio(info)
                     }
                     _ => {
-                        let mut info = BaseFileInfo::default();
-                        info.size = size;
+                        let info = BaseFileInfo {
+                            size,
+                            ..Default::default()
+                        };
+
                         AttachmentInfo::File(info)
                     }
                 };
@@ -109,19 +119,19 @@ pub async fn run(actor: &MatrixActor, args: SendMediaArgs) -> Vec<ToShell> {
                     args.thumbnail_mime,
                     args.width,
                     args.height,
-                ) {
-                    if let Ok(thumb_mime) = mime::Mime::from_str(&t_mime) {
-                        let size = (t_data.len() as u32).into();
+                ) && let Ok(thumb_mime) = mime::Mime::from_str(&t_mime)
+                {
+                    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+                    let size = (t_data.len() as u32).into();
 
-                        let thumbnail = Thumbnail {
-                            data: t_data,
-                            content_type: thumb_mime,
-                            width: w.into(),
-                            height: h.into(),
-                            size,
-                        };
-                        config = config.thumbnail(Some(thumbnail));
-                    }
+                    let thumbnail = Thumbnail {
+                        data: t_data,
+                        content_type: thumb_mime,
+                        width: w.into(),
+                        height: h.into(),
+                        size,
+                    };
+                    config = config.thumbnail(Some(thumbnail));
                 }
 
                 match room

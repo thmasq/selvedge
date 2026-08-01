@@ -14,7 +14,7 @@ pub async fn run(actor: &MatrixActor, args: SubmitUiaResponseArgs) -> Vec<ToShel
         let identifier = UserIdentifier::Matrix(MatrixUserIdentifier::new(
             client
                 .user_id()
-                .map(|id| id.to_string())
+                .map(std::string::ToString::to_string)
                 .unwrap_or_default(),
         ));
 

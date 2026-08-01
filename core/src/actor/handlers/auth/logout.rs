@@ -20,7 +20,7 @@ pub async fn run(actor: &MatrixActor, args: LogoutArgs) -> Vec<ToShell> {
                 actor.active_sas_verifications.borrow_mut().clear();
                 actor.active_qr_verifications.borrow_mut().clear();
 
-                *actor.search_engine.borrow_mut() = crate::actor::search::SearchEngine::new();
+                *actor.search_engine.lock().await = crate::actor::search::SearchEngine::new();
                 let () = gloo_storage::LocalStorage::clear();
 
                 if let Some(window) = web_sys::window()

@@ -1,3 +1,5 @@
+#![allow(clippy::future_not_send)]
+
 use matrix_sdk::Client;
 use matrix_sdk::cross_process_lock::CrossProcessLockConfig;
 use matrix_sdk_ui::notification_client::{
@@ -78,9 +80,10 @@ pub async fn handle_push(event: PushEvent) {
 }
 
 #[wasm_bindgen]
+#[must_use]
 pub fn rewrite_proxy_url(original_url: &str, proxy_server: &str) -> String {
     let clean_server = proxy_server
         .trim_start_matches("http://")
         .trim_start_matches("https://");
-    format!("https://{}/proxy/{}", clean_server, original_url)
+    format!("https://{clean_server}/proxy/{original_url}")
 }

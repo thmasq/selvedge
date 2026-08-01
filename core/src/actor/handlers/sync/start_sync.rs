@@ -224,11 +224,10 @@ pub async fn run(actor: &MatrixActor, _args: StartSyncArgs) -> Vec<ToShell> {
                         return;
                     };
 
-                    if let Some(user_id) = event_client.user_id() {
-                        if ev.sender() == user_id {
+                    if let Some(user_id) = event_client.user_id()
+                        && ev.sender() == user_id {
                             return;
                         }
-                    }
 
                     let Some(original): Option<
                         &OriginalSyncMessageLikeEvent<RoomMessageEventContent>,
@@ -237,7 +236,7 @@ pub async fn run(actor: &MatrixActor, _args: StartSyncArgs) -> Vec<ToShell> {
                     };
 
                     if let Ok(Some(push_actions)) = room.event_push_actions(&raw).await {
-                        let should_notify = push_actions.iter().any(|a| a.should_notify());
+                        let should_notify = push_actions.iter().any(ruma::push::Action::should_notify);
 
                         if should_notify {
                             let body = match &original.content.msgtype {

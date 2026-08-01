@@ -10,9 +10,9 @@ use selvedge_shared::model::ActorError;
 pub async fn run(actor: &MatrixActor, args: SetupRecoveryArgs) -> Vec<ToShell> {
     let client = actor.client.borrow().clone();
     if let Some(client) = client {
-        if let (Some(session), Some(pass)) = (args.uia_session, args.uia_password) {
-            if let Some(auth_data) = actor.build_uiaa_auth_data(session, pass) {
-                if let Err(e) = client
+        if let (Some(session), Some(pass)) = (args.uia_session, args.uia_password)
+            && let Some(auth_data) = actor.build_uiaa_auth_data(session, pass)
+                && let Err(e) = client
                     .encryption()
                     .bootstrap_cross_signing(Some(auth_data))
                     .await
@@ -27,8 +27,6 @@ pub async fn run(actor: &MatrixActor, args: SetupRecoveryArgs) -> Vec<ToShell> {
                         },
                     ))];
                 }
-            }
-        }
 
         match client
             .encryption()

@@ -1,3 +1,5 @@
+#![allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+
 use matrix_sdk::ruma::{OwnedEventId, OwnedRoomId};
 use rexie::{ObjectStore, Rexie, TransactionMode};
 use selvedge_shared::{EventItem, MessageContent, TimelineContent, TimelineItem};
@@ -6,6 +8,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
+use std::rc::Rc;
 use tantivy::Term;
 use tantivy::directory::RamDirectory;
 use tantivy::query::{BooleanQuery, Occur, QueryParser, TermQuery};
@@ -16,7 +19,7 @@ use wasm_bindgen::JsValue;
 
 pub struct SearchEngine {
     pub inner: SearchIndex,
-    db: Option<Rexie>,
+    pub db: Option<Rc<Rexie>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -128,9 +131,8 @@ impl SearchIndex {
         }
 
         let query_parser = QueryParser::for_index(&self.hot_index, vec![self.body_field]);
-        let user_query = match query_parser.parse_query(query_str) {
-            Ok(q) => q,
-            Err(_) => return vec![],
+        let Ok(user_query) = query_parser.parse_query(query_str) else {
+            return vec![];
         };
 
         let query: Box<dyn tantivy::query::Query> = if let Some(r_id) = room_id_filter {
@@ -155,8 +157,7 @@ impl SearchIndex {
             if let Ok(top_docs) = searcher.search(&*query, &top_docs_collector) {
                 for (_score, doc_address) in top_docs {
                     if let Ok(retrieved_doc) = searcher.doc::<tantivy::TantivyDocument>(doc_address)
-                    {
-                        if let (Some(body), Some(event_id_str), Some(sender_str), Some(timestamp)) = (
+                        && let (Some(body), Some(event_id_str), Some(sender_str), Some(timestamp)) = (
                             retrieved_doc
                                 .get_first(self.body_field)
                                 .and_then(|v| v.as_str()),
@@ -169,45 +170,43 @@ impl SearchIndex {
                             retrieved_doc
                                 .get_first(self.timestamp_field)
                                 .and_then(|v| v.as_u64()),
-                        ) {
-                            if let (Ok(event_id), Ok(sender)) = (
-                                matrix_sdk::ruma::OwnedEventId::try_from(event_id_str),
-                                matrix_sdk::ruma::OwnedUserId::try_from(sender_str),
-                            ) {
-                                let content =
-                                    Box::new(selvedge_shared::model::TimelineContent::Message(
-                                        selvedge_shared::model::MessageContent::Text {
-                                            body: body.to_string(),
-                                            formatted: None,
-                                            previews: vec![],
-                                        },
-                                    ));
+                        )
+                        && let (Ok(event_id), Ok(sender)) = (
+                            matrix_sdk::ruma::OwnedEventId::try_from(event_id_str),
+                            matrix_sdk::ruma::OwnedUserId::try_from(sender_str),
+                        )
+                    {
+                        let content = Box::new(selvedge_shared::model::TimelineContent::Message(
+                            selvedge_shared::model::MessageContent::Text {
+                                body: body.to_string(),
+                                formatted: None,
+                                previews: vec![],
+                            },
+                        ));
 
-                                let event_item = selvedge_shared::model::EventItem {
-                                    event_id: event_id.clone(),
-                                    sender,
-                                    sender_profile: None,
-                                    timestamp: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch(
-                                        timestamp.try_into().unwrap_or_else(|_| 0u32.into()),
-                                    ),
-                                    content,
-                                    reactions: indexmap::IndexMap::new(),
-                                    read_receipts: Vec::new(),
-                                    delivery_status: selvedge_shared::model::DeliveryStatus::Synced,
-                                    in_reply_to: None,
-                                    reply_details: None,
-                                    is_edited: false,
-                                    latest_edit: None,
-                                    thread_root_id: None,
-                                    is_highlight: false,
-                                    should_group: false,
-                                    encryption_status:
-                                        selvedge_shared::model::EncryptionStatus::Unencrypted,
-                                };
+                        let event_item = selvedge_shared::model::EventItem {
+                            event_id: event_id.clone(),
+                            sender,
+                            sender_profile: None,
+                            timestamp: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch(
+                                timestamp.try_into().unwrap_or_else(|_| 0u32.into()),
+                            ),
+                            content,
+                            reactions: indexmap::IndexMap::new(),
+                            read_receipts: Vec::new(),
+                            delivery_status: selvedge_shared::model::DeliveryStatus::Synced,
+                            in_reply_to: None,
+                            reply_details: None,
+                            is_edited: false,
+                            latest_edit: None,
+                            thread_root_id: None,
+                            is_highlight: false,
+                            should_group: false,
+                            encryption_status:
+                                selvedge_shared::model::EncryptionStatus::Unencrypted,
+                        };
 
-                                matched_events.insert(event_id, event_item);
-                            }
-                        }
+                        matched_events.insert(event_id, event_item);
                     }
                 }
             }
@@ -222,12 +221,13 @@ impl SearchIndex {
     }
 
     /// Serializes the entire Archive `RamDirectory` into a flat map of (Filename -> Bytes).
+    #[allow(clippy::unused_self)]
     pub fn export_archive_to_bytes(&self) -> HashMap<String, Vec<u8>> {
         // TODO: Implement a custom TrackingDirectory wrapper since RamDirectory lacks list()
         HashMap::new()
     }
 
-    /// Loads the binary blobs from IndexedDB into a fresh Archive RamDirectory
+    /// Loads the binary blobs from `IndexedDB` into a fresh Archive `RamDirectory`
     pub fn load_archive_from_bytes(&mut self, files: HashMap<String, Vec<u8>>) {
         let new_dir = RamDirectory::create();
         for (name, data) in files {
@@ -358,7 +358,7 @@ impl SearchEngine {
 
     /// Attempts to initialize the Rexie database. If the user refuses storage,
     /// it degrades gracefully into an ephemeral memory-only search.
-    pub async fn init_persistence(&mut self) {
+    pub async fn init_persistence(engine: Rc<futures::lock::Mutex<Self>>) {
         let db_result = Rexie::builder("selvedge_search_db")
             .version(1)
             .add_object_store(ObjectStore::new("tantivy_archive"))
@@ -368,15 +368,20 @@ impl SearchEngine {
 
         match db_result {
             Ok(db) => {
-                let _ = Self::recover_archive_on_startup(&mut self.inner, &db).await;
-                self.db = Some(db);
+                let recovered = Self::recover_archive_on_startup(&db)
+                    .await
+                    .unwrap_or_default();
+                let mut this = engine.lock().await;
+                this.inner.load_archive_from_bytes(recovered);
+
+                // Store inside Rc::new
+                this.db = Some(Rc::new(db));
             }
             Err(e) => {
                 web_sys::console::warn_1(&JsValue::from_str(&format!(
-                    "Search persistence disabled: {:?}",
-                    e
+                    "Search persistence disabled: {e:?}"
                 )));
-                self.db = None;
+                engine.lock().await.db = None;
             }
         }
     }
@@ -385,111 +390,117 @@ impl SearchEngine {
     pub async fn upsert_live_event(&mut self, room_id: &OwnedRoomId, item: &TimelineItem) {
         self.inner.upsert_item(room_id, item);
 
-        if let Some(db) = &self.db {
-            if let TimelineItem::Event(event_item) = item {
-                let entry = WalEntry {
-                    room_id: room_id.clone(),
-                    event: *event_item.clone(),
-                };
+        if let Some(db) = &self.db
+            && let TimelineItem::Event(event_item) = item
+        {
+            let entry = WalEntry {
+                room_id: room_id.clone(),
+                event: *event_item.clone(),
+            };
 
-                if let Ok(tx) = db.transaction(&["uncommitted_events"], TransactionMode::ReadWrite)
+            if let Ok(tx) = db.transaction(&["uncommitted_events"], TransactionMode::ReadWrite) {
+                if let Ok(store) = tx.store("uncommitted_events")
+                    && let Ok(js_value) = serde_wasm_bindgen::to_value(&entry)
                 {
-                    if let Ok(store) = tx.store("uncommitted_events") {
-                        if let Ok(js_value) = serde_wasm_bindgen::to_value(&entry) {
-                            let _ = store.add(&js_value, None).await;
-                        }
-                    }
-                    let _ = tx.done().await;
+                    let _ = store.add(&js_value, None).await;
                 }
+                let _ = tx.done().await;
             }
         }
     }
 
     /// Run this periodically (e.g., every 10 mins) to move WAL events into the Archive,
     /// prune old data, and save the blobs via an Atomic Transaction.
-    pub async fn run_archiving_cycle(&mut self) {
-        let db = match &self.db {
-            Some(db) => db,
-            None => {
-                self.inner.prune_hot_index(10_000);
-                if let Ok(segment_ids) = self.inner.hot_index.searchable_segment_ids() {
-                    if !segment_ids.is_empty() {
-                        let _ = self.inner.hot_writer.merge(&segment_ids).await;
-                    }
-                }
-                let _ = self.inner.hot_writer.garbage_collect_files().await;
-                return;
+    pub async fn run_archiving_cycle(engine: Rc<futures::lock::Mutex<Self>>) {
+        let (db_opt, segment_ids_to_merge) = {
+            let mut this = engine.lock().await;
+            let segment_ids = this
+                .inner
+                .hot_index
+                .searchable_segment_ids()
+                .unwrap_or_default();
+
+            if this.db.is_none() {
+                this.inner.prune_hot_index(10_000);
             }
+            (this.db.clone(), segment_ids)
         };
 
-        let mut uncommitted = Vec::new();
-        if let Ok(tx) = db.transaction(&["uncommitted_events"], TransactionMode::ReadOnly) {
-            if let Ok(store) = tx.store("uncommitted_events") {
-                if let Ok(all) = store.get_all(None, None).await {
-                    for val in all {
-                        if let Ok(entry) = serde_wasm_bindgen::from_value::<WalEntry>(val) {
-                            uncommitted.push(entry);
-                        }
+        if let Some(db) = db_opt {
+            let mut uncommitted = Vec::new();
+            if let Ok(tx) = db.transaction(&["uncommitted_events"], TransactionMode::ReadOnly)
+                && let Ok(store) = tx.store("uncommitted_events")
+                && let Ok(all) = store.get_all(None, None).await
+            {
+                for val in all {
+                    if let Ok(entry) = serde_wasm_bindgen::from_value::<WalEntry>(val) {
+                        uncommitted.push(entry);
                     }
                 }
             }
-        }
 
-        if uncommitted.is_empty() {
-            return;
-        }
+            if !uncommitted.is_empty() {
+                let exported_files = {
+                    let mut this = engine.lock().await;
+                    for entry in uncommitted {
+                        if let TimelineContent::Message(MessageContent::Text { body, .. }) =
+                            &*entry.event.content
+                        {
+                            let _ = this.inner.archive_writer.add_document(doc!(
+                                    this.inner.body_field => body.clone(),
+                                    this.inner.event_id_field => entry.event.event_id.to_string(),
+                                    this.inner.room_id_field => entry.room_id.to_string(),
+                                    this.inner.timestamp_field => u64::from(entry.event.timestamp.0),
+                                    this.inner.sender_field => entry.event.sender.to_string()
+    				));
+                        }
+                    }
+                    let _ = this.inner.archive_writer.commit();
+                    this.inner.prune_archive_index(150_000);
+                    this.inner.export_archive_to_bytes()
+                };
 
-        for entry in uncommitted {
-            if let TimelineContent::Message(MessageContent::Text { body, .. }) =
-                &*entry.event.content
-            {
-                let _ = self.inner.archive_writer.add_document(doc!(
-                    self.inner.body_field => body.clone(),
-                    self.inner.event_id_field => entry.event.event_id.to_string(),
-                    self.inner.room_id_field => entry.room_id.to_string(),
-                    self.inner.timestamp_field => u64::from(entry.event.timestamp.0),
-                    self.inner.sender_field => entry.event.sender.to_string()
-                ));
+                let mut this = engine.lock().await;
+                if let Ok(segment_ids) = this.inner.archive_index.searchable_segment_ids()
+                    && !segment_ids.is_empty()
+                {
+                    let _ = this.inner.archive_writer.merge(&segment_ids).await;
+                }
+                let _ = this.inner.archive_writer.garbage_collect_files().await;
+                drop(this);
+
+                if let Ok(tx) = db.transaction(
+                    &["tantivy_archive", "uncommitted_events"],
+                    TransactionMode::ReadWrite,
+                ) {
+                    if let (Ok(archive_store), Ok(wal_store)) =
+                        (tx.store("tantivy_archive"), tx.store("uncommitted_events"))
+                    {
+                        let _ = archive_store.clear().await;
+                        for (filename, bytes) in exported_files {
+                            let key = JsValue::from_str(&filename);
+                            let val = js_sys::Uint8Array::from(&bytes[..]);
+                            let _ = archive_store.add(&val, Some(&key)).await;
+                        }
+                        let _ = wal_store.clear().await;
+                    }
+                    let _ = tx.done().await;
+                }
             }
-        }
-        let _ = self.inner.archive_writer.commit();
-
-        self.inner.prune_archive_index(150_000);
-
-        if let Ok(segment_ids) = self.inner.archive_index.searchable_segment_ids() {
-            if !segment_ids.is_empty() {
-                let _ = self.inner.archive_writer.merge(&segment_ids).await;
+        } else {
+            let mut this = engine.lock().await;
+            if !segment_ids_to_merge.is_empty() {
+                let _ = this.inner.hot_writer.merge(&segment_ids_to_merge).await;
             }
-        }
-        let _ = self.inner.archive_writer.garbage_collect_files().await;
-
-        let exported_files = self.inner.export_archive_to_bytes();
-
-        if let Ok(tx) = db.transaction(
-            &["tantivy_archive", "uncommitted_events"],
-            TransactionMode::ReadWrite,
-        ) {
-            let archive_store = tx.store("tantivy_archive").unwrap();
-            let wal_store = tx.store("uncommitted_events").unwrap();
-
-            let _ = archive_store.clear().await;
-            for (filename, bytes) in exported_files {
-                let key = JsValue::from_str(&filename);
-                let val = js_sys::Uint8Array::from(&bytes[..]);
-                let _ = archive_store.add(&val, Some(&key)).await;
-            }
-
-            let _ = wal_store.clear().await;
-
-            let _ = tx.done().await;
+            let _ = this.inner.hot_writer.garbage_collect_files().await;
+            drop(this);
         }
     }
 
     /// Internal Startup Recovery
     async fn recover_archive_on_startup(
-        inner: &mut SearchIndex,
         db: &Rexie,
-    ) -> Result<(), rexie::Error> {
+    ) -> Result<HashMap<String, Vec<u8>>, rexie::Error> {
         let tx = db.transaction(&["tantivy_archive"], TransactionMode::ReadOnly)?;
         let store = tx.store("tantivy_archive")?;
 
@@ -497,14 +508,12 @@ impl SearchEngine {
         let keys = store.get_all_keys(None, None).await?;
         let all_blobs = store.get_all(None, None).await?;
 
-        for (key, val) in keys.into_iter().zip(all_blobs.into_iter()) {
+        for (key, val) in keys.into_iter().zip(all_blobs) {
             if let Some(filename) = key.as_string() {
                 let array = js_sys::Uint8Array::new(&val);
                 recovered_files.insert(filename, array.to_vec());
             }
         }
-        inner.load_archive_from_bytes(recovered_files);
-
-        Ok(())
+        Ok(recovered_files)
     }
 }

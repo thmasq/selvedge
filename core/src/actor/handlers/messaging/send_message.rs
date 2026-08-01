@@ -15,20 +15,17 @@ use selvedge_shared::model::ActorError;
 pub async fn run(actor: &MatrixActor, args: SendMessageArgs) -> Vec<ToShell> {
     let client_opt = actor.client.borrow().clone();
 
-    let (client, room) = match client_opt
+    let Some((client, room)) = client_opt
         .as_ref()
         .and_then(|c| c.get_room(&args.room_id).map(|r| (c.clone(), r)))
-    {
-        Some((c, r)) => (c, r),
-        None => {
-            return vec![ToShell::Core(CoreEvents::CommandResult(
-                CommandResultArgs {
-                    request_id: args.request_id,
-                    success: false,
-                    error: Some(ActorError::ClientNotInitialized),
-                },
-            ))];
-        }
+    else {
+        return vec![ToShell::Core(CoreEvents::CommandResult(
+            CommandResultArgs {
+                request_id: args.request_id,
+                success: false,
+                error: Some(ActorError::ClientNotInitialized),
+            },
+        ))];
     };
 
     let mut options = Options::empty();
@@ -45,18 +42,17 @@ pub async fn run(actor: &MatrixActor, args: SendMessageArgs) -> Vec<ToShell> {
     let mut ruma_content =
         RoomMessageEventContent::text_html(args.body.clone(), trimmed_html.clone());
 
-    if let Some(event_id) = &args.reply_to {
-        if let Ok(event) = room.event(event_id, None).await {
-            if let Ok(any_event) = event.kind.into_raw().deserialize() {
-                let full_event = any_event.into_full_event(args.room_id.clone());
-                if let AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(
-                    MessageLikeEvent::Original(orig_msg),
-                )) = full_event
-                {
-                    ruma_content =
-                        ruma_content.make_reply_to(&orig_msg, ForwardThread::Yes, AddMentions::Yes);
-                }
-            }
+    if let Some(event_id) = &args.reply_to
+        && let Ok(event) = room.event(event_id, None).await
+        && let Ok(any_event) = event.kind.into_raw().deserialize()
+    {
+        let full_event = any_event.into_full_event(args.room_id.clone());
+        if let AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(
+            MessageLikeEvent::Original(orig_msg),
+        )) = full_event
+        {
+            ruma_content =
+                ruma_content.make_reply_to(&orig_msg, ForwardThread::Yes, AddMentions::Yes);
         }
     }
 
@@ -77,18 +73,19 @@ pub async fn run(actor: &MatrixActor, args: SendMessageArgs) -> Vec<ToShell> {
     let q_room_id = args.room_id.clone();
 
     wasm_bindgen_futures::spawn_local(async move {
-        queue.borrow_mut().enqueue(task).await;
+        queue.lock().await.enqueue(task).await;
         crate::actor::queue::QueueManager::poke(queue, &q_room_id);
     });
 
     let user_id = client.user_id().unwrap().to_owned();
 
-    let fake_event_id = matrix_sdk::ruma::OwnedEventId::from_str(&format!("~{}", txn_id)).unwrap();
+    let fake_event_id = matrix_sdk::ruma::OwnedEventId::from_str(&format!("~{txn_id}")).unwrap();
 
     let local_echo = selvedge_shared::model::EventItem {
         event_id: fake_event_id,
         sender: user_id,
         sender_profile: None,
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
         timestamp: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch(
             (js_sys::Date::now() as u64)
                 .try_into()
@@ -97,7 +94,7 @@ pub async fn run(actor: &MatrixActor, args: SendMessageArgs) -> Vec<ToShell> {
         content: Box::new(selvedge_shared::model::TimelineContent::from(ruma_content)),
         reactions: indexmap::IndexMap::new(),
         read_receipts: Vec::new(),
-        delivery_status: selvedge_shared::model::DeliveryStatus::Sending(txn_id.clone()),
+        delivery_status: selvedge_shared::model::DeliveryStatus::Sending(txn_id),
         in_reply_to: args.reply_to,
         reply_details: None,
         is_edited: false,
