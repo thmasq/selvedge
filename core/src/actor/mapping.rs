@@ -1,6 +1,7 @@
 use eyeball_im::VectorDiff;
 use indexmap::IndexMap;
 use matrix_sdk::Client;
+use matrix_sdk::ruma::events::room::member::MembershipState;
 use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
 use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedTransactionId};
 use matrix_sdk_ui::room_list_service::RoomListItem;
@@ -98,7 +99,7 @@ pub async fn map_timeline_item_safe(
                         user_id: event.sender().to_owned(),
                         display_name: profile.display_name.clone(),
                         avatar_url: profile.avatar_url.clone(),
-                        membership: matrix_sdk::ruma::events::room::member::MembershipState::Join,
+                        membership: MembershipState::Join,
                         presence: PresenceState::Unavailable,
                         is_verified,
                     })
@@ -113,7 +114,7 @@ pub async fn map_timeline_item_safe(
                 timestamp: MilliSecondsSinceUnixEpoch(event.timestamp().0),
                 content: Box::new(content),
                 reactions: IndexMap::default(),
-                read_receipts: Vec::default(),
+                read_receipts: event.read_receipts().keys().cloned().collect(),
                 delivery_status,
                 in_reply_to: None,
                 reply_details: None,

@@ -8,4 +8,5 @@ crate::define_handler_group!(Room {
     pub mod load_room_members;
     pub mod open_room;
     pub mod set_typing;
+    pub mod send_receipt;
 });
