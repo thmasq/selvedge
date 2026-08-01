@@ -1,5 +1,6 @@
 use crate::actor::MatrixActor;
 use matrix_sdk::Client;
+use matrix_sdk::cross_process_lock::CrossProcessLockConfig;
 use selvedge_shared::event::ToShell;
 use selvedge_shared::message::auth::login::LoginArgs;
 use selvedge_shared::model::ActorError;
@@ -10,8 +11,8 @@ use selvedge_shared::event::auth::login_success::LoginSuccessArgs;
 
 pub async fn run(actor: &MatrixActor, args: LoginArgs) -> Vec<ToShell> {
     let client_builder = Client::builder()
-        .homeserver_url(&args.homeserver_url)
-        .indexeddb_store("selvedge-store", None);
+        .indexeddb_store("selvedge-store", None)
+        .cross_process_store_config(CrossProcessLockConfig::multi_process("selvedge_app"));
 
     match client_builder.build().await {
         Ok(client) => match client

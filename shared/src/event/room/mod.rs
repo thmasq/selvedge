@@ -6,4 +6,5 @@ crate::define_event_group!(Room {
     pub mod room_trust_level_updated;
     pub mod timeline_diff;
     pub mod typing_updated;
+    pub mod notification_received;
 });

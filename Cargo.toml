@@ -45,7 +45,7 @@ thiserror = "2.0.19"
 uuid = { version = "1.24.0", features = ["v4", "serde", "js"] }
 wasm-bindgen = "0.2.126"
 wasm-bindgen-futures = "0.4.76"
-web-sys = { version = "0.3.103", features = ["ServiceWorkerGlobalScope", "FetchEvent", "Cache", "CacheStorage", "Request", "Response", "Window", "IdbFactory", "IdbOpenDbRequest"] }
+web-sys = { version = "0.3.103", features = ["ServiceWorkerGlobalScope", "ServiceWorkerRegistration", "PushEvent", "FetchEvent", "Cache", "CacheStorage", "Request", "RequestInit", "Response", "Window", "IdbFactory", "IdbOpenDbRequest", "NotificationOptions", "Clients", "WindowClient", "ExtendableEvent", "PushMessageData"] }
 
 [profile.release]
 opt-level = 3

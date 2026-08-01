@@ -1,16 +1,23 @@
 use crate::actor::MatrixActor;
 use crate::actor::mapping::map_room_list_diff;
 use futures::StreamExt;
+use futures::channel::mpsc::UnboundedSender;
 use matrix_sdk::ruma::events::ToDeviceEvent;
 use matrix_sdk::ruma::events::key::verification::done::ToDeviceKeyVerificationDoneEventContent;
 use matrix_sdk::ruma::events::key::verification::request::ToDeviceKeyVerificationRequestEventContent;
 use matrix_sdk::ruma::events::receipt::{ReceiptType, SyncReceiptEvent};
+use matrix_sdk::ruma::events::room::message::SyncRoomMessageEvent;
 use matrix_sdk::ruma::events::room_key_request::{Action, ToDeviceRoomKeyRequestEventContent};
 use matrix_sdk::ruma::events::typing::SyncTypingEvent;
 use matrix_sdk::ruma::presence::PresenceState;
 use matrix_sdk::{Client, Room};
 use matrix_sdk_ui::room_list_service::{RoomListService, filters::new_filter_all};
 
+use ruma::events::OriginalSyncMessageLikeEvent;
+use ruma::events::SyncMessageLikeEvent;
+use ruma::events::room::message::MessageType;
+use ruma::events::room::message::RoomMessageEventContent;
+use ruma::serde::Raw;
 use selvedge_shared::event::ToShell;
 use selvedge_shared::event::core::CoreEvents;
 use selvedge_shared::event::core::background_error::BackgroundErrorArgs;
@@ -19,6 +26,7 @@ use selvedge_shared::event::crypto::identity_updated::IdentityUpdatedArgs;
 use selvedge_shared::event::crypto::room_key_request_received::RoomKeyRequestReceivedArgs;
 use selvedge_shared::event::crypto::verification_update::VerificationUpdateArgs;
 use selvedge_shared::event::room::RoomEvents;
+use selvedge_shared::event::room::notification_received::NotificationReceivedArgs;
 use selvedge_shared::event::room::profiles_fetched::ProfilesFetchedArgs;
 use selvedge_shared::event::room::room_list_diff::RoomListDiffArgs;
 use selvedge_shared::event::room::typing_updated::TypingUpdatedArgs;
@@ -199,6 +207,55 @@ pub async fn run(actor: &MatrixActor, _args: StartSyncArgs) -> Vec<ToShell> {
                                 requester_device_id: ev.content.requesting_device_id.to_string(),
                             }),
                         ));
+                    }
+                }
+            },
+        );
+
+        let notification_sender = sender.clone();
+        client.add_event_handler(
+            move |raw: Raw<SyncRoomMessageEvent>, room: Room, event_client: Client| {
+                let sender_for_async: UnboundedSender<ToShell> = notification_sender.clone();
+                async move {
+                    let Ok(ev): Result<
+                        SyncMessageLikeEvent<RoomMessageEventContent>,
+                        serde_json::Error,
+                    > = raw.deserialize() else {
+                        return;
+                    };
+
+                    if let Some(user_id) = event_client.user_id() {
+                        if ev.sender() == user_id {
+                            return;
+                        }
+                    }
+
+                    let Some(original): Option<
+                        &OriginalSyncMessageLikeEvent<RoomMessageEventContent>,
+                    > = ev.as_original() else {
+                        return;
+                    };
+
+                    if let Ok(Some(push_actions)) = room.event_push_actions(&raw).await {
+                        let should_notify = push_actions.iter().any(|a| a.should_notify());
+
+                        if should_notify {
+                            let body = match &original.content.msgtype {
+                                MessageType::Text(text) => text.body.clone(),
+                                MessageType::Image(_) => "Image".to_string(),
+                                MessageType::Video(_) => "Video".to_string(),
+                                _ => "New message".to_string(),
+                            };
+
+                            let _ = sender_for_async.unbounded_send(ToShell::Room(
+                                RoomEvents::NotificationReceived(NotificationReceivedArgs {
+                                    room_id: room.room_id().to_owned(),
+                                    event_id: original.event_id.clone(),
+                                    sender: original.sender.to_string(),
+                                    body,
+                                }),
+                            ));
+                        }
                     }
                 }
             },
