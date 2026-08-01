@@ -19,7 +19,7 @@ use wasm_bindgen_futures::spawn_local;
 pub enum TaskPayload {
     SendMessage {
         txn_id: OwnedTransactionId,
-        content: RoomMessageEventContent,
+        content: Box<RoomMessageEventContent>,
     },
     SendReaction {
         event_id: OwnedEventId,
@@ -227,7 +227,7 @@ impl QueueManager {
         match &task.payload {
             TaskPayload::SendMessage { txn_id, content } => {
                 let result = room
-                    .send(content.clone())
+                    .send(*content.clone())
                     .with_transaction_id(txn_id.clone())
                     .await;
                 result.is_ok()

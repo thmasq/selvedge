@@ -60,7 +60,7 @@ pub async fn run(actor: &MatrixActor, args: SendMessageArgs) -> Vec<ToShell> {
 
     let task_payload = crate::actor::queue::TaskPayload::SendMessage {
         txn_id: txn_id.clone(),
-        content: ruma_content.clone(),
+        content: Box::new(ruma_content.clone()),
     };
 
     let task = crate::actor::queue::OutboundTask {

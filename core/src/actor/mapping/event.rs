@@ -12,7 +12,7 @@ use std::str::FromStr;
 
 use super::content::resolve_content;
 
-pub(crate) fn compute_delivery_status(event: &EventTimelineItem) -> DeliveryStatus {
+pub fn compute_delivery_status(event: &EventTimelineItem) -> DeliveryStatus {
     event
         .send_state()
         .map_or(DeliveryStatus::Synced, |local_echo| match local_echo {
@@ -26,14 +26,14 @@ pub(crate) fn compute_delivery_status(event: &EventTimelineItem) -> DeliveryStat
         })
 }
 
-pub(crate) fn resolve_event_id(event: &EventTimelineItem) -> matrix_sdk::ruma::OwnedEventId {
+pub fn resolve_event_id(event: &EventTimelineItem) -> matrix_sdk::ruma::OwnedEventId {
     event.event_id().map_or_else(
         || matrix_sdk::ruma::OwnedEventId::from_str("$dummy").unwrap(),
         std::borrow::ToOwned::to_owned,
     )
 }
 
-pub(crate) async fn build_sender_profile(
+pub async fn build_sender_profile(
     client: &Client,
     event: &EventTimelineItem,
 ) -> Option<selvedge_shared::MemberProfile> {
@@ -59,7 +59,7 @@ pub(crate) async fn build_sender_profile(
     })
 }
 
-pub(crate) fn extract_reactions(
+pub fn extract_reactions(
     client: &Client,
     msg_like: &MsgLikeContent,
 ) -> IndexMap<String, selvedge_shared::model::ReactionDetails> {
@@ -78,7 +78,7 @@ pub(crate) fn extract_reactions(
     reactions
 }
 
-pub(crate) fn build_reply_details(
+pub fn build_reply_details(
     client: &Client,
     replied_event: &EmbeddedEvent,
 ) -> selvedge_shared::model::ReplyDetails {
@@ -94,13 +94,13 @@ pub(crate) fn build_reply_details(
     }
 }
 
-pub(crate) struct ReplyInfo {
+pub struct ReplyInfo {
     pub in_reply_to: Option<OwnedEventId>,
     pub reply_details: Option<selvedge_shared::model::ReplyDetails>,
     pub thread_root_id: Option<OwnedEventId>,
 }
 
-pub(crate) fn extract_reply_info(client: &Client, msg_like: &MsgLikeContent) -> ReplyInfo {
+pub fn extract_reply_info(client: &Client, msg_like: &MsgLikeContent) -> ReplyInfo {
     let thread_root_id = msg_like.thread_root.clone();
 
     let Some(reply_info) = &msg_like.in_reply_to else {
@@ -123,7 +123,7 @@ pub(crate) fn extract_reply_info(client: &Client, msg_like: &MsgLikeContent) -> 
     }
 }
 
-pub(crate) fn compute_encryption_status(event: &EventTimelineItem) -> EncryptionStatus {
+pub fn compute_encryption_status(event: &EventTimelineItem) -> EncryptionStatus {
     match event.get_shield(false) {
         TimelineEventShieldState::None => {
             if event.encryption_info().is_some() {

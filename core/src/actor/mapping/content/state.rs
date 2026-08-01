@@ -10,7 +10,7 @@ pub fn map_membership(change: &RoomMembershipChange) -> StateContent {
         membership: MembershipState::Join, // Optional: Extract deeply from change.content()
         prev_membership: None,
         reason: None,
-        change: change.change().map(|c| format!("{:?}", c)),
+        change: change.change().map(|c| format!("{c:?}")),
     }
 }
 
@@ -31,25 +31,25 @@ pub fn map_other(state: &OtherState) -> StateContent {
         AnyOtherStateEventContentChange::RoomName(n) => StateContent::RoomName {
             name: match n {
                 StateEventContentChange::Original { content, .. } => Some(content.name.clone()),
-                _ => None,
+                StateEventContentChange::Redacted(_) => None,
             },
         },
         AnyOtherStateEventContentChange::RoomTopic(t) => StateContent::RoomTopic {
             topic: match t {
                 StateEventContentChange::Original { content, .. } => Some(content.topic.clone()),
-                _ => None,
+                StateEventContentChange::Redacted(_) => None,
             },
         },
         AnyOtherStateEventContentChange::RoomAvatar(a) => StateContent::RoomAvatar {
             url: match a {
                 StateEventContentChange::Original { content, .. } => content.url.clone(),
-                _ => None,
+                StateEventContentChange::Redacted(_) => None,
             },
         },
         AnyOtherStateEventContentChange::RoomEncryption(e) => StateContent::RoomEncryption {
             algorithm: match e {
                 StateEventContentChange::Original { content, .. } => content.algorithm.to_string(),
-                _ => String::new(),
+                StateEventContentChange::Redacted(_) => String::new(),
             },
         },
         _ => StateContent::OtherState {

@@ -5,22 +5,19 @@ use matrix_sdk_ui::room_list_service::RoomListItem;
 use selvedge_shared::{RoomListEntryDiff, RoomListEntryView, RoomSummary};
 use std::collections::HashSet;
 
-pub(crate) fn compute_last_activity(
-    client: &Client,
-    item: &RoomListItem,
-) -> MilliSecondsSinceUnixEpoch {
+pub fn compute_last_activity(client: &Client, item: &RoomListItem) -> MilliSecondsSinceUnixEpoch {
     client
         .get_room(item.room_id())
         .and_then(|room| room.latest_event_timestamp())
         .unwrap_or_else(|| MilliSecondsSinceUnixEpoch(0u32.into()))
 }
 
-pub(crate) fn is_room_encrypted(room: Option<&matrix_sdk::Room>) -> bool {
+pub fn is_room_encrypted(room: Option<&matrix_sdk::Room>) -> bool {
     room.as_ref()
         .is_some_and(|r| r.encryption_state().is_encrypted())
 }
 
-pub(crate) async fn build_room_summary(client: &Client, item: &RoomListItem) -> RoomSummary {
+pub async fn build_room_summary(client: &Client, item: &RoomListItem) -> RoomSummary {
     let unread = item.unread_notification_counts();
     let last_activity = compute_last_activity(client, item);
     let room = client.get_room(item.room_id());

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use super::event::map_event_item;
 
-pub(crate) const fn map_virtual_item(virt: &VirtualTimelineItem) -> VirtualItem {
+pub const fn map_virtual_item(virt: &VirtualTimelineItem) -> VirtualItem {
     match virt {
         VirtualTimelineItem::DateDivider(ts) => VirtualItem::DayDivider {
             ts: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch(ts.0),

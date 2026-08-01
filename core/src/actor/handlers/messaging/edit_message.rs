@@ -38,18 +38,16 @@ pub async fn run(actor: &MatrixActor, args: EditMessageArgs) -> Vec<ToShell> {
     let safe_html = selvedge_shared::sanitize_matrix_html(&raw_html);
     let trimmed_html = safe_html.trim().to_string();
 
-    let ruma_content =
-        RoomMessageEventContent::text_html(args.new_body.clone(), trimmed_html.clone());
+    let ruma_content = RoomMessageEventContent::text_html(args.new_body.clone(), trimmed_html);
 
     let replacement =
         ruma_content.make_replacement(ReplacementMetadata::new(args.event_id.clone(), None));
 
     let txn_id = matrix_sdk::ruma::TransactionId::new();
 
-    // Reusing the SendMessage payload since an edit is just a message event
     let task_payload = crate::actor::queue::TaskPayload::SendMessage {
-        txn_id: txn_id.clone(),
-        content: replacement,
+        txn_id,
+        content: Box::new(replacement),
     };
 
     let task = crate::actor::queue::OutboundTask {

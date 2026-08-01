@@ -24,7 +24,7 @@ pub fn resolve_content(
             call_intent,
             declined_by,
             ..
-        } => voip::map_rtc(call_intent, declined_by),
+        } => voip::map_rtc(call_intent.as_ref(), declined_by),
 
         TimelineItemContent::FailedToParseMessageLike { event_type, error } => {
             TimelineContent::FailedToParseMessageLike {
