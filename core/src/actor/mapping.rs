@@ -1,13 +1,13 @@
 use eyeball_im::VectorDiff;
 use indexmap::IndexMap;
 use matrix_sdk::Client;
+use matrix_sdk::ruma::MilliSecondsSinceUnixEpoch;
 use matrix_sdk::ruma::events::room::member::MembershipState;
 use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
-use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedTransactionId};
 use matrix_sdk_ui::room_list_service::RoomListItem;
+use matrix_sdk_ui::timeline::TimelineEventShieldState;
 use matrix_sdk_ui::timeline::{
-    EventSendState, Message, TimelineDetails, TimelineItemContent, TimelineItemKind,
-    VirtualTimelineItem,
+    EventSendState, TimelineDetails, TimelineItemContent, TimelineItemKind, VirtualTimelineItem,
 };
 use ruma::presence::PresenceState;
 use selvedge_shared::{
@@ -70,7 +70,7 @@ pub async fn map_timeline_item_safe(
                 .send_state()
                 .map_or(DeliveryStatus::Synced, |local_echo| match local_echo {
                     EventSendState::NotSentYet { .. } => {
-                        DeliveryStatus::Sending(OwnedTransactionId::from("dummy"))
+                        DeliveryStatus::Sending(matrix_sdk::ruma::OwnedTransactionId::from("dummy"))
                     }
                     EventSendState::Sent { .. } => DeliveryStatus::Sent,
                     EventSendState::SendingFailed { .. } => DeliveryStatus::Error(
@@ -79,11 +79,9 @@ pub async fn map_timeline_item_safe(
                 });
 
             let event_id = event.event_id().map_or_else(
-                || OwnedEventId::from_str("$dummy").unwrap(),
+                || matrix_sdk::ruma::OwnedEventId::from_str("$dummy").unwrap(),
                 std::borrow::ToOwned::to_owned,
             );
-
-            let is_edited = event.content().as_message().is_some_and(Message::is_edited);
 
             let sender_profile = match event.sender_profile() {
                 TimelineDetails::Ready(profile) => {
@@ -107,29 +105,91 @@ pub async fn map_timeline_item_safe(
                 _ => None,
             };
 
+            let mut reactions = IndexMap::new();
+            let mut in_reply_to = None;
+            let mut reply_details = None;
+            let mut thread_root_id = None;
+
+            if let TimelineItemContent::MsgLike(msg_like) = event.content() {
+                for (emoji, users) in msg_like.reactions.iter() {
+                    let count = users.len() as u64;
+                    let me_reacted = client
+                        .user_id()
+                        .map_or(false, |my_id| users.contains_key(my_id));
+
+                    reactions.insert(
+                        emoji.clone(),
+                        selvedge_shared::model::ReactionDetails { count, me_reacted },
+                    );
+                }
+
+                thread_root_id = msg_like.thread_root.clone();
+
+                if let Some(reply_info) = &msg_like.in_reply_to {
+                    in_reply_to = Some(reply_info.event_id.clone());
+
+                    if let TimelineDetails::Ready(replied_event) = &reply_info.event {
+                        let reply_content = Box::new(match &replied_event.content {
+                            TimelineItemContent::MsgLike(rl_msg) => {
+                                rl_msg
+                                    .as_message()
+                                    .map_or(TimelineContent::Unsupported, |m| {
+                                        TimelineContent::from(RoomMessageEventContent::new(
+                                            m.msgtype().clone(),
+                                        ))
+                                    })
+                            }
+                            _ => TimelineContent::Unsupported,
+                        });
+
+                        reply_details = Some(selvedge_shared::model::ReplyDetails {
+                            sender: replied_event.sender.clone(),
+                            sender_display_name: match &replied_event.sender_profile {
+                                TimelineDetails::Ready(p) => p.display_name.clone(),
+                                _ => None,
+                            },
+                            content: reply_content,
+                        });
+                    }
+                }
+            }
+
+            let encryption_status = match event.get_shield(false) {
+                TimelineEventShieldState::None => {
+                    if event.encryption_info().is_some() {
+                        EncryptionStatus::Verified
+                    } else {
+                        EncryptionStatus::Unencrypted
+                    }
+                }
+                _ => EncryptionStatus::Unverified,
+            };
+
+            let is_edited = event.content().as_message().is_some_and(|m| m.is_edited());
+
             TimelineItem::Event(Box::new(EventItem {
                 event_id,
                 sender: event.sender().to_owned(),
                 sender_profile,
-                timestamp: MilliSecondsSinceUnixEpoch(event.timestamp().0),
+                timestamp: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch(event.timestamp().0),
                 content: Box::new(content),
-                reactions: IndexMap::default(),
+                reactions,
                 read_receipts: event.read_receipts().keys().cloned().collect(),
                 delivery_status,
-                in_reply_to: None,
-                reply_details: None,
+                in_reply_to,
+                reply_details,
                 is_edited,
                 latest_edit: None,
-                thread_root_id: None,
+                thread_root_id,
                 is_highlight: event.is_highlighted(),
                 should_group: false,
-                encryption_status: EncryptionStatus::Unencrypted,
+                encryption_status,
             }))
         }
         TimelineItemKind::Virtual(virt) => match virt {
             VirtualTimelineItem::DateDivider(ts) => {
                 TimelineItem::Virtual(VirtualItem::DayDivider {
-                    ts: MilliSecondsSinceUnixEpoch(ts.0),
+                    ts: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch(ts.0),
                 })
             }
             _ => TimelineItem::Virtual(VirtualItem::LoadingIndicator),
