@@ -7,7 +7,6 @@ use matrix_sdk::ruma::{
     },
 };
 use rexie::{ObjectStore, Rexie, TransactionMode};
-use selvedge_shared::model::MessageContent;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, VecDeque},
@@ -25,10 +24,6 @@ pub enum TaskPayload {
     SendReaction {
         event_id: OwnedEventId,
         key: String,
-    },
-    EditMessage {
-        event_id: OwnedEventId,
-        new_content: MessageContent,
     },
     RedactMessage {
         event_id: OwnedEventId,
@@ -249,8 +244,16 @@ impl QueueManager {
                     .await;
                 result.is_ok()
             }
+            TaskPayload::RedactMessage { event_id, reason } => {
+                let redact_txn_id = OwnedTransactionId::from(task.id.clone());
+                let result = room
+                    .redact(event_id, reason.as_deref(), Some(redact_txn_id))
+                    .await;
+                result.is_ok()
+            }
 
             // ... handle other variants
+            #[allow(unreachable_patterns)]
             _ => false,
         }
     }

@@ -22,10 +22,13 @@ use std::sync::Arc;
 
 fn map_message_content(event: &EventTimelineItem) -> TimelineContent {
     match event.content() {
-        TimelineItemContent::MsgLike(msg) => msg.as_message().map_or_else(
-            || TimelineContent::Unsupported,
-            |msg_content| RoomMessageEventContent::new(msg_content.msgtype().clone()).into(),
-        ),
+        TimelineItemContent::MsgLike(msg) => match &msg.kind {
+            matrix_sdk_ui::timeline::MsgLikeKind::Message(msg_content) => {
+                RoomMessageEventContent::new(msg_content.msgtype().clone()).into()
+            }
+            matrix_sdk_ui::timeline::MsgLikeKind::Redacted => TimelineContent::Redacted,
+            _ => TimelineContent::Unsupported,
+        },
         _ => TimelineContent::Unsupported,
     }
 }
