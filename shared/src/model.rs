@@ -227,6 +227,26 @@ pub enum TimelineContent {
         session_id: String,
         sender_key: String,
     },
+    LiveLocation {
+        is_active: bool,
+    },
+    OtherMessageLike {
+        event_type: String,
+    },
+    CallInvite,
+    RtcNotification {
+        call_intent: Option<String>,
+        declined_by: Vec<OwnedUserId>,
+    },
+    FailedToParseMessageLike {
+        event_type: String,
+        error: String,
+    },
+    FailedToParseState {
+        event_type: String,
+        state_key: String,
+        error: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -284,12 +304,70 @@ pub enum StateContent {
         membership: MembershipState,
         prev_membership: Option<MembershipState>,
         reason: Option<String>,
+        change: Option<String>,
+    },
+    ProfileChange {
+        user_id: OwnedUserId,
+        displayname_change: Option<(Option<String>, Option<String>)>,
+        avatar_url_change: Option<(Option<OwnedMxcUri>, Option<OwnedMxcUri>)>,
     },
     RoomName {
-        name: String,
+        name: Option<String>,
     },
     RoomTopic {
-        topic: String,
+        topic: Option<String>,
+    },
+    RoomAvatar {
+        url: Option<OwnedMxcUri>,
+    },
+    RoomCanonicalAlias {
+        alias: Option<matrix_sdk::ruma::OwnedRoomAliasId>,
+    },
+    RoomCreate {
+        creator: OwnedUserId,
+        room_version: matrix_sdk::ruma::RoomVersionId,
+    },
+    RoomEncryption {
+        algorithm: String,
+    },
+    RoomGuestAccess {
+        guest_access: String,
+    },
+    RoomHistoryVisibility {
+        history_visibility: String,
+    },
+    RoomJoinRules {
+        join_rule: String,
+    },
+    RoomPinnedEvents {
+        pinned: Vec<OwnedEventId>,
+    },
+    RoomPowerLevels {
+        // Power levels are massive; usually best to just signal a change
+        // to the shell so it can trigger a full room permissions refetch if needed
+        changed: bool,
+    },
+    RoomServerAcl,
+    RoomThirdPartyInvite {
+        display_name: String,
+    },
+    RoomTombstone {
+        body: String,
+        replacement_room: OwnedRoomId,
+    },
+    SpaceChild {
+        via: Vec<matrix_sdk::ruma::OwnedServerName>,
+    },
+    SpaceParent {
+        via: Vec<matrix_sdk::ruma::OwnedServerName>,
+        canonical: bool,
+    },
+    PolicyRuleRoom,
+    PolicyRuleServer,
+    PolicyRuleUser,
+    OtherState {
+        event_type: String,
+        state_key: String,
     },
 }
 
