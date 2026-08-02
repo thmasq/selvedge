@@ -11,6 +11,10 @@ pub const fn map_virtual_item(virt: &VirtualTimelineItem) -> VirtualItem {
         VirtualTimelineItem::DateDivider(ts) => VirtualItem::DayDivider {
             ts: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch(ts.0),
         },
+        VirtualTimelineItem::ReadMarker => VirtualItem::ReadMarker,
+        VirtualTimelineItem::TimelineStart => VirtualItem::TimelineStart,
+
+        #[allow(unreachable_patterns)]
         _ => VirtualItem::LoadingIndicator,
     }
 }

@@ -2,10 +2,10 @@ use crate::actor::MatrixActor;
 use selvedge_shared::event::ToShell;
 use selvedge_shared::event::core::CoreEvents;
 use selvedge_shared::event::core::command_result::CommandResultArgs;
-use selvedge_shared::message::messaging::send_reaction::SendReactionArgs;
+use selvedge_shared::message::messaging::remove_reaction::RemoveReactionArgs;
 use selvedge_shared::model::ActorError;
 
-pub async fn run(actor: &MatrixActor, args: SendReactionArgs) -> Vec<ToShell> {
+pub async fn run(actor: &MatrixActor, args: RemoveReactionArgs) -> Vec<ToShell> {
     let client_opt = actor.client.borrow().clone();
 
     if client_opt.is_none()
@@ -27,8 +27,9 @@ pub async fn run(actor: &MatrixActor, args: SendReactionArgs) -> Vec<ToShell> {
     let task = crate::actor::queue::OutboundTask {
         id: uuid::Uuid::new_v4().to_string(),
         room_id: args.room_id.clone(),
-        payload: crate::actor::queue::TaskPayload::SendReaction {
-            event_id: args.event_id.clone(),
+        payload: crate::actor::queue::TaskPayload::RemoveReaction {
+            target_event_id: args.target_event_id.clone(),
+            reaction_event_id: args.reaction_event_id.clone(),
             key: args.key.clone(),
         },
     };
@@ -45,9 +46,9 @@ pub async fn run(actor: &MatrixActor, args: SendReactionArgs) -> Vec<ToShell> {
         selvedge_shared::event::room::timeline_diff::TimelineDiffArgs {
             room_id: args.room_id.clone(),
             diff: vec![selvedge_shared::model::TimelineDiff::UpdateReaction {
-                event_id: args.event_id.clone(),
+                event_id: args.target_event_id.clone(),
                 key: args.key.clone(),
-                delta: 1,
+                delta: -1,
             }],
         },
     ));

@@ -81,17 +81,44 @@ pub struct CallParticipant {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TimelineDiff {
-    Append { entries: Vec<TimelineItem> },
+    Append {
+        entries: Vec<TimelineItem>,
+    },
     Clear,
-    PushFront { entry: TimelineItem },
-    PushBack { entry: TimelineItem },
+    PushFront {
+        entry: TimelineItem,
+    },
+    PushBack {
+        entry: TimelineItem,
+    },
     PopFront,
     PopBack,
-    Insert { index: usize, entry: TimelineItem },
-    Set { index: usize, entry: TimelineItem },
-    Remove { index: usize },
-    Truncate { length: usize },
-    Reset { entries: Vec<TimelineItem> },
+    Insert {
+        index: usize,
+        entry: TimelineItem,
+    },
+    Set {
+        index: usize,
+        entry: TimelineItem,
+    },
+    Remove {
+        index: usize,
+    },
+    Truncate {
+        length: usize,
+    },
+    Reset {
+        entries: Vec<TimelineItem>,
+    },
+    ReplaceByEventId {
+        event_id: OwnedEventId,
+        entry: TimelineItem,
+    },
+    UpdateReaction {
+        event_id: OwnedEventId,
+        key: String,
+        delta: i64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -458,11 +485,15 @@ pub struct RoomPermissions {
 pub struct ReactionDetails {
     pub count: u64,
     pub me_reacted: bool,
+    pub my_reaction_event_id: Option<OwnedEventId>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum DeliveryStatus {
-    Sending(OwnedTransactionId),
+    Sending {
+        txn_id: OwnedTransactionId,
+        progress_pct: Option<f32>,
+    },
     Sent,
     Error(ModelError),
     Synced,
@@ -525,6 +556,7 @@ pub enum VerificationState {
 pub enum VirtualItem {
     DayDivider { ts: MilliSecondsSinceUnixEpoch },
     LoadingIndicator,
+    ReadMarker,
     TimelineStart,
 }
 

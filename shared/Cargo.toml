@@ -11,6 +11,7 @@ ammonia = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 matrix-sdk = { workspace = true }
 paste = { workspace = true }
+pulldown-cmark = { workspace = true }
 ruma = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }

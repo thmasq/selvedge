@@ -1,9 +1,11 @@
+use futures::lock::Mutex;
 use gloo_timers::callback::Timeout;
 use matrix_sdk::ruma::{
     OwnedEventId, OwnedRoomId, OwnedTransactionId,
     events::{
-        reaction::ReactionEventContent, relation::Annotation,
-        room::message::RoomMessageEventContent,
+        reaction::ReactionEventContent,
+        relation::Annotation,
+        room::message::{ReplacementMetadata, RoomMessageEventContent},
     },
 };
 use rexie::{ObjectStore, Rexie, TransactionMode};
@@ -15,19 +17,31 @@ use std::{
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::spawn_local;
 
+use crate::actor::queue::TaskPayload::RemoveReaction;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TaskPayload {
     SendMessage {
         txn_id: OwnedTransactionId,
         content: Box<RoomMessageEventContent>,
     },
-    SendReaction {
-        event_id: OwnedEventId,
-        key: String,
+    EditMessage {
+        txn_id: OwnedTransactionId,
+        target_event_id: OwnedEventId,
+        new_content: Box<RoomMessageEventContent>,
     },
     RedactMessage {
         event_id: OwnedEventId,
         reason: Option<String>,
+    },
+    SendReaction {
+        event_id: OwnedEventId,
+        key: String,
+    },
+    RemoveReaction {
+        target_event_id: OwnedEventId,
+        reaction_event_id: Option<OwnedEventId>,
+        key: String,
     },
 }
 
@@ -76,7 +90,7 @@ impl QueueManager {
         }
     }
 
-    pub async fn init_persistence(manager: Rc<futures::lock::Mutex<Self>>) {
+    pub async fn init_persistence(manager: Rc<Mutex<Self>>) {
         let db_result = Rexie::builder("selvedge_queue_db")
             .version(1)
             .add_object_store(ObjectStore::new("outbound_tasks").key_path("id"))
@@ -122,6 +136,31 @@ impl QueueManager {
             task.id = uuid::Uuid::new_v4().to_string();
         }
 
+        let state = self
+            .queues
+            .entry(task.room_id.clone())
+            .or_insert_with(RoomQueueState::new);
+
+        if let RemoveReaction {
+            target_event_id: rm_target,
+            key: rm_key,
+            ..
+        } = &task.payload
+        {
+            if let Some(pos) = state.tasks.iter().position(|t| {
+                if let TaskPayload::SendReaction { event_id, key } = &t.payload {
+                    event_id == rm_target && key == rm_key
+                } else {
+                    false
+                }
+            }) {
+                let removed_task = state.tasks.remove(pos).unwrap();
+                self.remove_from_db(&removed_task.id).await;
+
+                return;
+            }
+        }
+
         if let Some(db) = &self.db
             && let Ok(tx) = db.transaction(&["outbound_tasks"], TransactionMode::ReadWrite)
         {
@@ -133,10 +172,6 @@ impl QueueManager {
             let _ = tx.done().await;
         }
 
-        let state = self
-            .queues
-            .entry(task.room_id.clone())
-            .or_insert_with(RoomQueueState::new);
         state.tasks.push_back(task);
     }
 
@@ -152,7 +187,7 @@ impl QueueManager {
         }
     }
 
-    pub fn poke(manager: Rc<futures::lock::Mutex<Self>>, room_id: &OwnedRoomId) {
+    pub fn poke(manager: Rc<Mutex<Self>>, room_id: &OwnedRoomId) {
         let r_id = room_id.clone();
         spawn_local(async move {
             let mut mgr = manager.lock().await;
@@ -177,12 +212,55 @@ impl QueueManager {
 
             drop(mgr);
 
-            let success = Self::execute_task(&client, &task).await;
+            let result = Self::execute_task(&client, &task).await;
 
             let mut mgr = manager_clone.lock().await;
-
             let state = mgr.queues.get_mut(&r_id).unwrap();
-            if success {
+
+            if let Ok(returned_event_id) = result {
+                if let TaskPayload::SendMessage { txn_id, .. } = &task.payload {
+                    if let Some(real_event_id) = returned_event_id {
+                        let fake_id = format!("~{txn_id}");
+                        let mut needs_db_update = Vec::new();
+
+                        for pending_task in &mut state.tasks {
+                            let mut rewritten = false;
+                            match &mut pending_task.payload {
+                                TaskPayload::EditMessage {
+                                    target_event_id, ..
+                                } => {
+                                    if target_event_id.as_str() == fake_id {
+                                        *target_event_id = real_event_id.clone();
+                                        rewritten = true;
+                                    }
+                                }
+                                TaskPayload::SendReaction { event_id, .. }
+                                | TaskPayload::RedactMessage { event_id, .. } => {
+                                    if event_id.as_str() == fake_id {
+                                        *event_id = real_event_id.clone();
+                                        rewritten = true;
+                                    }
+                                }
+                                _ => {}
+                            }
+
+                            if rewritten {
+                                needs_db_update.push(pending_task.clone());
+                            }
+                        }
+
+                        if !needs_db_update.is_empty() {
+                            let mgr_for_db = manager_clone.clone();
+                            spawn_local(async move {
+                                let mut db_mgr = mgr_for_db.lock().await;
+                                for updated_task in needs_db_update {
+                                    db_mgr.enqueue(updated_task).await;
+                                }
+                            });
+                        }
+                    }
+                }
+
                 state.tasks.pop_front();
                 state.failures = 0;
                 state.is_sending = false;
@@ -219,9 +297,12 @@ impl QueueManager {
         });
     }
 
-    async fn execute_task(client: &matrix_sdk::Client, task: &OutboundTask) -> bool {
+    async fn execute_task(
+        client: &matrix_sdk::Client,
+        task: &OutboundTask,
+    ) -> Result<Option<OwnedEventId>, ()> {
         let Some(room) = client.get_room(&task.room_id) else {
-            return false;
+            return Err(());
         };
 
         match &task.payload {
@@ -230,31 +311,53 @@ impl QueueManager {
                     .send(*content.clone())
                     .with_transaction_id(txn_id.clone())
                     .await;
-                result.is_ok()
+                result.map(|r| Some(r.response.event_id)).map_err(|_| ())
             }
-
-            TaskPayload::SendReaction { event_id, key } => {
-                let reaction =
-                    ReactionEventContent::new(Annotation::new(event_id.clone(), key.clone()));
-
-                let reaction_txn_id = OwnedTransactionId::from(task.id.clone());
+            TaskPayload::EditMessage {
+                txn_id,
+                target_event_id,
+                new_content,
+            } => {
+                let replacement = new_content
+                    .clone()
+                    .make_replacement(ReplacementMetadata::new(target_event_id.clone(), None));
                 let result = room
-                    .send(reaction)
-                    .with_transaction_id(reaction_txn_id)
+                    .send(replacement)
+                    .with_transaction_id(txn_id.clone())
                     .await;
-                result.is_ok()
+                result.map(|r| Some(r.response.event_id)).map_err(|_| ())
             }
             TaskPayload::RedactMessage { event_id, reason } => {
                 let redact_txn_id = OwnedTransactionId::from(task.id.clone());
                 let result = room
                     .redact(event_id, reason.as_deref(), Some(redact_txn_id))
                     .await;
-                result.is_ok()
+                result.map(|_| None).map_err(|_| ())
+            }
+            TaskPayload::SendReaction { event_id, key } => {
+                let reaction =
+                    ReactionEventContent::new(Annotation::new(event_id.clone(), key.clone()));
+                let reaction_txn_id = OwnedTransactionId::from(task.id.clone());
+                let result = room
+                    .send(reaction)
+                    .with_transaction_id(reaction_txn_id)
+                    .await;
+                result.map(|_| None).map_err(|_| ())
+            }
+            TaskPayload::RemoveReaction {
+                reaction_event_id, ..
+            } => {
+                if let Some(event_id) = reaction_event_id {
+                    let redact_txn_id = OwnedTransactionId::from(task.id.clone());
+                    let result = room.redact(event_id, None, Some(redact_txn_id)).await;
+                    result.map(|_| None).map_err(|_| ())
+                } else {
+                    Ok(None)
+                }
             }
 
-            // ... handle other variants
             #[allow(unreachable_patterns)]
-            _ => false,
+            _ => Err(()),
         }
     }
 }

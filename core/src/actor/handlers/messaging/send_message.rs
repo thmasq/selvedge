@@ -94,7 +94,10 @@ pub async fn run(actor: &MatrixActor, args: SendMessageArgs) -> Vec<ToShell> {
         content: Box::new(selvedge_shared::model::TimelineContent::from(ruma_content)),
         reactions: indexmap::IndexMap::new(),
         read_receipts: Vec::new(),
-        delivery_status: selvedge_shared::model::DeliveryStatus::Sending(txn_id),
+        delivery_status: selvedge_shared::model::DeliveryStatus::Sending {
+            txn_id: txn_id.clone(),
+            progress_pct: None,
+        },
         in_reply_to: args.reply_to,
         reply_details: None,
         is_edited: false,

@@ -1,7 +1,7 @@
 use crate::actor::MatrixActor;
 use crate::actor::mapping::{map_timeline_diff, map_timeline_item_safe};
 use futures::StreamExt;
-use matrix_sdk_ui::timeline::RoomExt;
+use matrix_sdk_ui::timeline::{RoomExt, TimelineReadReceiptTracking};
 use selvedge_shared::event::ToShell;
 use selvedge_shared::event::room::RoomEvents;
 use selvedge_shared::event::room::room_details_update::RoomDetailsUpdateArgs;
@@ -18,7 +18,13 @@ pub async fn run(actor: &MatrixActor, args: OpenRoomArgs) -> Vec<ToShell> {
     {
         let has_timeline = actor.active_timelines.borrow().contains_key(&args.room_id);
 
-        if !has_timeline && let Ok(timeline) = room.timeline_builder().build().await {
+        if !has_timeline
+            && let Ok(timeline) = room
+                .timeline_builder()
+                .track_read_marker_and_receipts(TimelineReadReceiptTracking::AllEvents)
+                .build()
+                .await
+        {
             let is_encrypted = room.encryption_state().is_encrypted();
 
             let trust_level = if is_encrypted {

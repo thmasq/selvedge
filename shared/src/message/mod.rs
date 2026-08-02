@@ -5,3 +5,5 @@ crate::define_top_level_messages! {
     pub mod room;
     pub mod sync;
 }
+
+pub mod markdown;

@@ -3,8 +3,8 @@ use matrix_sdk::Client;
 use matrix_sdk::ruma::OwnedEventId;
 use matrix_sdk::ruma::events::room::member::MembershipState;
 use matrix_sdk_ui::timeline::{
-    EmbeddedEvent, EventSendState, EventTimelineItem, MsgLikeContent, TimelineDetails,
-    TimelineEventShieldState, TimelineItemContent,
+    EmbeddedEvent, EventSendState, EventTimelineItem, MsgLikeContent, ReactionStatus,
+    TimelineDetails, TimelineEventShieldState, TimelineItemContent,
 };
 use ruma::presence::PresenceState;
 use selvedge_shared::{DeliveryStatus, EncryptionStatus, EventItem, ModelError};
@@ -16,8 +16,25 @@ pub fn compute_delivery_status(event: &EventTimelineItem) -> DeliveryStatus {
     event
         .send_state()
         .map_or(DeliveryStatus::Synced, |local_echo| match local_echo {
-            EventSendState::NotSentYet { .. } => {
-                DeliveryStatus::Sending(matrix_sdk::ruma::OwnedTransactionId::from("dummy"))
+            EventSendState::NotSentYet { progress } => {
+                let txn_id = event.transaction_id().map_or_else(
+                    || matrix_sdk::ruma::OwnedTransactionId::from("unknown"),
+                    std::borrow::ToOwned::to_owned,
+                );
+
+                let progress_pct = progress.as_ref().and_then(|p| {
+                    let total = p.progress.total as f32;
+                    if total > 0.0 {
+                        Some(p.progress.current as f32 / total)
+                    } else {
+                        None
+                    }
+                });
+
+                DeliveryStatus::Sending {
+                    txn_id,
+                    progress_pct,
+                }
             }
             EventSendState::Sent { .. } => DeliveryStatus::Sent,
             EventSendState::SendingFailed { .. } => {
@@ -64,15 +81,28 @@ pub fn extract_reactions(
     msg_like: &MsgLikeContent,
 ) -> IndexMap<String, selvedge_shared::model::ReactionDetails> {
     let mut reactions = IndexMap::new();
+    let my_user_id = client.user_id();
+
     for (emoji, users) in msg_like.reactions.iter() {
         let count = users.len() as u64;
-        let me_reacted = client
-            .user_id()
-            .is_some_and(|my_id| users.contains_key(my_id));
+        let me_reacted = my_user_id.is_some_and(|my_id| users.contains_key(my_id));
+
+        let mut my_reaction_event_id = None;
+        if let Some(my_id) = my_user_id {
+            if let Some(reaction_info) = users.get(my_id) {
+                if let ReactionStatus::RemoteToRemote(event_id) = &reaction_info.status {
+                    my_reaction_event_id = Some(event_id.clone());
+                }
+            }
+        }
 
         reactions.insert(
             emoji.clone(),
-            selvedge_shared::model::ReactionDetails { count, me_reacted },
+            selvedge_shared::model::ReactionDetails {
+                count,
+                me_reacted,
+                my_reaction_event_id,
+            },
         );
     }
     reactions

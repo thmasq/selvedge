@@ -5,9 +5,18 @@ use matrix_sdk_ui::timeline::{
 use selvedge_shared::model::StateContent;
 
 pub fn map_membership(change: &RoomMembershipChange) -> StateContent {
+    let membership = match change.change() {
+        Some(matrix_sdk_ui::timeline::MembershipChange::Joined) => MembershipState::Join,
+        Some(matrix_sdk_ui::timeline::MembershipChange::Left) => MembershipState::Leave,
+        Some(matrix_sdk_ui::timeline::MembershipChange::Banned) => MembershipState::Ban,
+        Some(matrix_sdk_ui::timeline::MembershipChange::Invited) => MembershipState::Invite,
+        Some(matrix_sdk_ui::timeline::MembershipChange::Knocked) => MembershipState::Knock,
+        _ => MembershipState::Join,
+    };
+
     StateContent::Member {
         user_id: change.user_id().to_owned(),
-        membership: MembershipState::Join, // Optional: Extract deeply from change.content()
+        membership,
         prev_membership: None,
         reason: None,
         change: change.change().map(|c| format!("{c:?}")),
