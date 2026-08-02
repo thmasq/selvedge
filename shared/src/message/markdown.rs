@@ -1,6 +1,7 @@
-use matrix_sdk::ruma::{UserId, events::Mentions};
+use matrix_sdk::ruma::{OwnedUserId, UserId, events::Mentions};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd, html};
-use std::collections::HashSet;
+use smallvec::SmallVec;
+use std::borrow::Cow;
 use std::ops::Range;
 
 pub fn parse_matrix_markdown(text: &str) -> String {
@@ -21,18 +22,8 @@ pub fn parse_matrix_markdown(text: &str) -> String {
     // unpaired Text events the way AST-level splitting would.
     let parser = Parser::new_ext(&with_spoilers, options);
     let events = parser.map(|event| match event {
-        Event::InlineMath(cow) => {
-            let escaped = html_escape(&cow);
-            Event::Html(
-                format!("<span data-mx-maths=\"{escaped}\"><code>{escaped}</code></span>").into(),
-            )
-        }
-        Event::DisplayMath(cow) => {
-            let escaped = html_escape(&cow);
-            Event::Html(
-                format!("<div data-mx-maths=\"{escaped}\"><code>{escaped}</code></div>").into(),
-            )
-        }
+        Event::InlineMath(cow) => Event::Html(wrap_math(&cow, "span").into()),
+        Event::DisplayMath(cow) => Event::Html(wrap_math(&cow, "div").into()),
         _ => event,
     });
 
@@ -40,25 +31,29 @@ pub fn parse_matrix_markdown(text: &str) -> String {
     html::push_html(&mut raw_html, events);
     // pulldown-cmark renders table alignment as style="text-align: ..."
     // which isn't in the sanitizer's default td/th allow-list; rewrite
-    // it to the equivalent, already-permitted `align` attribute.
-    let raw_html = raw_html
-        .replace(r#"style="text-align: left""#, r#"align="left""#)
-        .replace(r#"style="text-align: center""#, r#"align="center""#)
-        .replace(r#"style="text-align: right""#, r#"align="right""#);
-    let safe_html = crate::sanitize_matrix_html(&raw_html);
-    safe_html.trim().to_string()
+    // it in place to the equivalent, already-permitted `align` attribute.
+    rewrite_table_align(&mut raw_html);
+    let mut safe_html = crate::sanitize_matrix_html(&raw_html);
+
+    let trimmed_len = safe_html.trim_end().len();
+    safe_html.truncate(trimmed_len);
+    let leading_ws = safe_html.len() - safe_html.trim_start().len();
+    if leading_ws > 0 {
+        safe_html.drain(..leading_ws);
+    }
+    safe_html
 }
 
 pub fn extract_mentions(text: &str) -> Option<Mentions> {
     const MAX_MXID_LEN: usize = 255;
     const TRAILING_PUNCT: &[char] = &[')', ']', '}', '>', ',', '.', '!', '?', ';', ':', '\'', '"'];
 
-    let mut user_ids = HashSet::new();
+    let mut user_ids: SmallVec<[OwnedUserId; 4]> = SmallVec::new();
     let mut room = false;
     let mut prev_char: Option<char> = None;
 
     for (start, ch) in text.char_indices() {
-        if ch == '@' && !prev_char.is_some_and(|c| c.is_alphanumeric()) {
+        if ch == '@' && prev_char.is_none_or(|c| !c.is_alphanumeric()) {
             let mut end = start + ch.len_utf8();
             for c in text[end..].chars() {
                 if c.is_whitespace() || end - start >= MAX_MXID_LEN {
@@ -66,21 +61,14 @@ pub fn extract_mentions(text: &str) -> Option<Mentions> {
                 }
                 end += c.len_utf8();
             }
-            let mut candidate = &text[start..end];
-            loop {
-                if candidate == "@room" {
-                    room = true;
-                    break;
-                }
-                if let Ok(user_id) = UserId::parse(candidate) {
-                    user_ids.insert(user_id);
-                    break;
-                }
-                match candidate.chars().last() {
-                    Some(c) if candidate.len() > 1 && TRAILING_PUNCT.contains(&c) => {
-                        candidate = &candidate[..candidate.len() - c.len_utf8()];
-                    }
-                    _ => break,
+            let candidate = &text[start..end];
+            let trimmed = candidate.trim_end_matches(TRAILING_PUNCT);
+
+            if trimmed == "@room" {
+                room = true;
+            } else if let Ok(user_id) = UserId::parse(trimmed) {
+                if !user_ids.contains(&user_id) {
+                    user_ids.push(user_id);
                 }
             }
         }
@@ -98,8 +86,8 @@ pub fn extract_mentions(text: &str) -> Option<Mentions> {
 
 // Byte ranges, in the original source, that spoiler substitution must
 // never split a "||" across: code spans/blocks and math spans.
-fn protected_ranges(text: &str, options: Options) -> Vec<Range<usize>> {
-    let mut ranges = Vec::new();
+fn protected_ranges(text: &str, options: Options) -> SmallVec<[Range<usize>; 4]> {
+    let mut ranges = SmallVec::new();
     let mut block_start: Option<usize> = None;
     for (event, range) in Parser::new_ext(text, options).into_offset_iter() {
         match event {
@@ -128,28 +116,30 @@ fn is_protected(pos: usize, ranges: &[Range<usize>], cursor: &mut usize) -> bool
 // start or complete a pair). An odd match count drops the final,
 // unpaired "||" so it stays literal instead of opening a spoiler that
 // swallows the rest of the message.
-fn find_spoiler_markers(text: &str, protected: &[Range<usize>]) -> Vec<usize> {
-    let chars: Vec<(usize, char)> = text.char_indices().collect();
-    let mut markers = Vec::new();
+fn find_spoiler_markers(text: &str, protected: &[Range<usize>]) -> SmallVec<[usize; 4]> {
+    let mut markers = SmallVec::new();
     let mut cursor = 0;
-    let mut i = 0;
-    while i < chars.len() {
-        let (pos, c) = chars[i];
-        if c == '\\' && i + 1 < chars.len() && chars[i + 1].1.is_ascii_punctuation() {
-            i += 2;
+    let mut iter = text.char_indices().peekable();
+    while let Some((pos, c)) = iter.next() {
+        if c == '\\' {
+            if iter
+                .peek()
+                .is_some_and(|&(_, nc)| nc.is_ascii_punctuation())
+            {
+                iter.next();
+            }
             continue;
         }
-        if c == '|' && i + 1 < chars.len() && chars[i + 1].1 == '|' {
-            let (pos2, _) = chars[i + 1];
-            if !is_protected(pos, protected, &mut cursor)
-                && !is_protected(pos2, protected, &mut cursor)
-            {
-                markers.push(pos);
-                i += 2;
-                continue;
+        if c == '|' {
+            if let Some(&(pos2, '|')) = iter.peek() {
+                if !is_protected(pos, protected, &mut cursor)
+                    && !is_protected(pos2, protected, &mut cursor)
+                {
+                    markers.push(pos);
+                    iter.next();
+                }
             }
         }
-        i += 1;
     }
     if markers.len() % 2 != 0 {
         markers.pop();
@@ -167,26 +157,12 @@ fn at_line_start(text: &str, pos: usize) -> bool {
     text[line_start..pos].chars().all(|c| c == ' ' || c == '\t')
 }
 
-// fn process_spoilers(text: &str, protected: &[Range<usize>]) -> String {
-//     let markers = find_spoiler_markers(text, protected);
-//     let mut result = String::with_capacity(text.len());
-//     let mut cursor = 0;
-//     for (idx, &pos) in markers.iter().enumerate() {
-//         result.push_str(&text[cursor..pos]);
-//         result.push_str(if idx % 2 == 0 {
-//             "<span data-mx-spoiler>"
-//         } else {
-//             "</span>"
-//         });
-//         cursor = pos + 2;
-//     }
-//     result.push_str(&text[cursor..]);
-//     result
-// }
-
-fn process_spoilers(text: &str, protected: &[Range<usize>]) -> String {
+fn process_spoilers<'a>(text: &'a str, protected: &[Range<usize>]) -> Cow<'a, str> {
     let markers = find_spoiler_markers(text, protected);
-    let mut result = String::with_capacity(text.len());
+    if markers.is_empty() {
+        return Cow::Borrowed(text);
+    }
+    let mut result = String::with_capacity(text.len() + markers.len() * 8);
     let mut cursor = 0;
     for (idx, &pos) in markers.iter().enumerate() {
         result.push_str(&text[cursor..pos]);
@@ -201,14 +177,53 @@ fn process_spoilers(text: &str, protected: &[Range<usize>]) -> String {
         cursor = pos + 2;
     }
     result.push_str(&text[cursor..]);
-    result
+    Cow::Owned(result)
 }
 
-fn html_escape(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
+fn wrap_math(src: &str, tag: &str) -> String {
+    let mut out = String::with_capacity(src.len() * 2 + 32);
+    out.push('<');
+    out.push_str(tag);
+    out.push_str(" data-mx-maths=\"");
+    push_html_escaped(&mut out, src);
+    out.push_str("\"><code>");
+    push_html_escaped(&mut out, src);
+    out.push_str("</code></");
+    out.push_str(tag);
+    out.push('>');
+    out
+}
+
+fn push_html_escaped(out: &mut String, text: &str) {
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            _ => out.push(c),
+        }
+    }
+}
+
+fn rewrite_table_align(html: &mut String) {
+    let prefix = r#"style="text-align: "#;
+    let mut cursor = 0;
+    while let Some(rel) = html[cursor..].find(prefix) {
+        let start = cursor + rel;
+        let (pat_len, replacement) = if html[start..].starts_with(r#"style="text-align: left""#) {
+            (r#"style="text-align: left""#.len(), r#"align="left""#)
+        } else if html[start..].starts_with(r#"style="text-align: center""#) {
+            (r#"style="text-align: center""#.len(), r#"align="center""#)
+        } else if html[start..].starts_with(r#"style="text-align: right""#) {
+            (r#"style="text-align: right""#.len(), r#"align="right""#)
+        } else {
+            cursor = start + prefix.len();
+            continue;
+        };
+        html.replace_range(start..start + pat_len, replacement);
+        cursor = start + replacement.len();
+    }
 }
 
 #[cfg(test)]
