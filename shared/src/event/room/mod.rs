@@ -7,4 +7,5 @@ crate::define_event_group!(Room {
     pub mod timeline_diff;
     pub mod typing_updated;
     pub mod notification_received;
+    pub mod room_members_searched;
 });

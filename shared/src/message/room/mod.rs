@@ -9,4 +9,5 @@ crate::define_message_group!(Room {
     pub mod open_room;
     pub mod set_typing;
     pub mod send_receipt;
+    pub mod search_room_members;
 });
