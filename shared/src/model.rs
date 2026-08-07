@@ -259,6 +259,7 @@ pub enum TimelineContent {
     },
     OtherMessageLike {
         event_type: String,
+        body: Option<String>,
     },
     CallInvite,
     RtcNotification {

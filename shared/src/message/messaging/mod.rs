@@ -7,4 +7,6 @@ crate::define_message_group!(Messaging {
     pub mod redact_message;
     pub mod send_reaction;
     pub mod remove_reaction;
+    pub mod retry_message;
+    pub mod cancel_message;
 });

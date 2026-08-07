@@ -7,7 +7,7 @@ use matrix_sdk_ui::timeline::{
     TimelineDetails, TimelineEventShieldState, TimelineItemContent,
 };
 use ruma::presence::PresenceState;
-use selvedge_shared::{DeliveryStatus, EncryptionStatus, EventItem, ModelError};
+use selvedge_shared::{DeliveryStatus, EncryptionStatus, EventItem, ModelError, TimelineContent};
 use std::str::FromStr;
 
 use super::content::resolve_content;
@@ -167,7 +167,18 @@ pub fn compute_encryption_status(event: &EventTimelineItem) -> EncryptionStatus 
 }
 
 pub async fn map_event_item(client: &Client, event: &EventTimelineItem) -> EventItem {
-    let content = resolve_content(event.content(), client.user_id());
+    let mut content = resolve_content(event.content(), client.user_id());
+
+    if let TimelineContent::OtherMessageLike {
+        event_type: _,
+        body,
+    } = &mut content
+    {
+        if let Some(raw) = event.original_json() {
+            *body = raw.get_field::<String>("body").ok().flatten();
+        }
+    }
+
     let delivery_status = compute_delivery_status(event);
     let event_id = resolve_event_id(event);
     let sender_profile = build_sender_profile(client, event).await;

@@ -83,6 +83,7 @@ pub fn map(msg: &MsgLikeContent, own_user_id: Option<&UserId>) -> TimelineConten
         },
         MsgLikeKind::Other(o) => TimelineContent::OtherMessageLike {
             event_type: o.event_type().to_string(),
+            body: None,
         },
     }
 }
