@@ -7,38 +7,38 @@ This document tracks the feature completion of the Core actor for the Selvedge M
 ### Milestone 1: Core Chat Primitives (Messaging & Timeline)
 
 - [x] **Rich Text Formatting:** Compile Markdown to HTML locally and send `text_html` alongside `text_plain`.
-- [ ] **Emotes (`m.emote`):** Intercept `/me` commands in the Core to send the `m.emote` message type instead of standard text.
-- [ ] **Unknown Message Fallbacks:** Render the standard `body` string for unrecognized custom `msgtype` or event types.
-- [ ] **Notice Handling (`m.notice`):** Map `m.notice` events explicitly so the UI can render bot/bridge messages appropriately.
+- [x] **Emotes (`m.emote`):** Intercept `/me` commands in the Core to send the `m.emote` message type instead of standard text.
+- [x] **Unknown Message Fallbacks:** Render the standard `body` string for unrecognized custom `msgtype` or event types.
+- [x] **Notice Handling (`m.notice`):** Map `m.notice` events explicitly so the UI can render bot/bridge messages appropriately.
 - [ ] **State Event Formatting:** Map timeline state events (joins, parts, bans) into structured, UI-ready formats like `StateEvent::MemberJoin("Alice")`.
-- [ ] **Virtual Timeline Items:** Map `VirtualTimelineItem::DayDivider` events from the SDK to the UI to display date separators.
-- [ ] **Local Echo Send States:** Map `EventSendState` (Sending, Sent, Failed) to the UI to display loading spinners or error indicators.
-- [ ] **Failed Message Retry:** Add a handler to re-attempt sending a local echo that was marked as `Failed`.
-- [ ] **Failed Message Cancel:** Add a handler to discard a failed local echo, removing it from the timeline.
+- [x] **Virtual Timeline Items:** Map `VirtualTimelineItem::DayDivider` events from the SDK to the UI to display date separators.
+- [x] **Local Echo Send States:** Map `EventSendState` (Sending, Sent, Failed) to the UI to display loading spinners or error indicators.
+- [x] **Failed Message Retry:** Add a handler to re-attempt sending a local echo that was marked as `Failed`.
+- [x] **Failed Message Cancel:** Add a handler to discard a failed local echo, removing it from the timeline.
 
 - [ ] **Max Media Upload Check:** Fetch the homeserver's `m.upload.size` limit before initiating `send_media` to reject oversized files immediately.
 - [ ] **Media Metadata & Thumbnails:** Generate and attach thumbnails, blurhashes, width, and height to media uploads to prevent UI layout shifts.
 - [ ] **Media Captions:** Update `send_media` to accept and attach optional text captions to image, video, and file uploads.
 - [ ] **On-Demand Media Fetching:** Expose only thumbnails initially, deferring full-res media streams until explicitly requested by the UI.
 
-- [ ] **Reply HTML Fallbacks:** Append the standard HTML blockquote fallback to replied messages for backwards compatibility.
-- [ ] **Nested Reply Stripping:** Strip existing `<mx-reply>` blocks when replying to an existing reply to prevent infinite quote nesting.
+- [x] **Reply HTML Fallbacks:** Append the standard HTML blockquote fallback to replied messages for backwards compatibility.
+- [x] **Nested Reply Stripping:** Strip existing `<mx-reply>` blocks when replying to an existing reply to prevent infinite quote nesting.
 - [ ] **Member Autocomplete Provider:** Add a Core helper to quickly filter and return room members matching a string prefix to fuel UI mention menus.
-- [ ] **Intentional Mentions (MSC3952):** Populate the `m.mentions` array in the event content when tagging users.
+- [x] **Intentional Mentions (MSC3952):** Populate the `m.mentions` array in the event content when tagging users.
 - [ ] **Mention Pill Resolution:** Provide a Core helper to synchronously resolve Matrix IDs in HTML into `MemberProfile` data for pretty UI rendering.
-- [ ] **Code Block Metadata:** Preserve `language-*` classes on `<pre><code>` blocks in the Markdown parser to allow syntax highlighting.
-- [ ] **Spoiler Formatting:** Support parsing and sending spoilers using the Matrix `<span data-mx-spoiler>` standard.
-- [ ] **Mathematical Formatting (MSC3193):** Render LaTeX/Math equations using the `data-mx-maths` HTML attribute within the Markdown compiler.
+- [x] **Code Block Metadata:** Preserve `language-*` classes on `<pre><code>` blocks in the Markdown parser to allow syntax highlighting.
+- [x] **Spoiler Formatting:** Support parsing and sending spoilers using the Matrix `<span data-mx-spoiler>` standard.
+- [x] **Mathematical Formatting (MSC3193):** Render LaTeX/Math equations using the `data-mx-maths` HTML attribute within the Markdown compiler.
 
-- [ ] **Message Editing:** Implement sending messages with the `m.replace` relation to edit previously sent messages.
-- [ ] **Message Redaction (Deletion):** Implement sending `m.room.redaction` events so users can delete their own messages.
-- [ ] **Pending Edit & Redaction States:** Expose the pending `EventSendState` of offline edits and redactions so the UI can display loading indicators.
-- [ ] **Emoji Reactions:** Add endpoints to send and remove `m.reaction` events.
+- [x] **Message Editing:** Implement sending messages with the `m.replace` relation to edit previously sent messages.
+- [x] **Message Redaction (Deletion):** Implement sending `m.room.redaction` events so users can delete their own messages.
+- [x] **Pending Edit & Redaction States:** Expose the pending `EventSendState` of offline edits and redactions so the UI can display loading indicators.
+- [x] **Emoji Reactions:** Add endpoints to send and remove `m.reaction` events.
 
 - [ ] **Send Read Receipts:** Create a handler to send `m.receipt` events to the server as the user reads new messages.
 - [ ] **Read Receipt Debouncing:** Implement a debounce queue in the Core to prevent rate-limiting when the user rapidly scrolls.
 - [ ] **Private Read Receipts (MSC2285):** Support sending `m.read.private` instead of `m.read` based on a user preference toggle to hide read status from others.
-- [ ] **Extract Read Receipts:** Map incoming `read_receipts` from the SDK timeline items so the UI can render "read by" avatars.
+- [x] **Extract Read Receipts:** Map incoming `read_receipts` from the SDK timeline items so the UI can render "read by" avatars.
 - [ ] **Fully Read Markers:** Create a handler to send the `m.fully_read` account data event to sync the user's scroll position across devices.
 - [ ] **The "New Messages" Divider:** Map the `VirtualTimelineItem::ReadMarker` event to allow the UI to render a separator line for unread messages.
 
@@ -46,7 +46,7 @@ This document tracks the feature completion of the Core actor for the Selvedge M
 - [ ] **Event Permalink Generation:** Add a Core helper to construct `matrix.to` or `matrix://` URIs for sharing specific messages.
 - [ ] **Jump to Message:** Add a handler to dynamically load a focused timeline around a specific event ID when a user clicks a reply block.
 - [ ] **Composer Drafts:** Persist in-progress text input per room to IndexedDB so unsent messages survive page refreshes.
-- [ ] **Offline Queuing:** Implement a local queue to hold messages sent while disconnected, automatically flushing when reconnected.
+- [x] **Offline Queuing:** Implement a local queue to hold messages sent while disconnected, automatically flushing when reconnected.
 - [ ] **Push Rule Evaluation:** Wire up the SDK's push rule evaluator to dynamically flip an `is_highlight` boolean on incoming messages.
 - [ ] **Decryption Error States (UTD):** Map specific `EncryptionStatus` error types to display actionable UI placeholders.
 - [ ] **Per-Message Trust Shields:** Expose a warning flag on timeline items if a previously verified user sends a message from an unverified session.
