@@ -8,4 +8,5 @@ crate::define_event_group!(Room {
     pub mod typing_updated;
     pub mod notification_received;
     pub mod room_members_searched;
+    pub mod history_loaded;
 });
