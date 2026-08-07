@@ -24,7 +24,6 @@ matrix-sdk = { workspace = true }
 matrix-sdk-ui = { workspace = true }
 mime = { workspace = true }
 paste = { workspace = true }
-pulldown-cmark = { workspace = true }
 rexie = { workspace = true }
 ruma = { workspace = true }
 selvedge-shared = { path = "../shared" }

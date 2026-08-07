@@ -3,7 +3,6 @@ use matrix_sdk::ruma::events::room::message::{
     AddMentions, ForwardThread, RoomMessageEventContent,
 };
 use matrix_sdk::ruma::events::{AnyMessageLikeEvent, AnyTimelineEvent, MessageLikeEvent};
-use pulldown_cmark::{Options, Parser, html};
 use std::str::FromStr;
 
 use selvedge_shared::event::ToShell;
@@ -28,19 +27,23 @@ pub async fn run(actor: &MatrixActor, args: SendMessageArgs) -> Vec<ToShell> {
         ))];
     };
 
-    let mut options = Options::empty();
-    options.insert(Options::ENABLE_STRIKETHROUGH);
-    options.insert(Options::ENABLE_TABLES);
+    let (body, is_emote) = if let Some(stripped) = args.body.strip_prefix("/me ") {
+        (stripped.to_string(), true)
+    } else {
+        (args.body.clone(), false)
+    };
 
-    let parser = Parser::new_ext(&args.body, options);
-    let mut raw_html = String::new();
-    html::push_html(&mut raw_html, parser);
+    let trimmed_html = selvedge_shared::message::markdown::parse_matrix_markdown(&body);
 
-    let safe_html = selvedge_shared::sanitize_matrix_html(&raw_html);
-    let trimmed_html = safe_html.trim().to_string();
+    let mut ruma_content = if is_emote {
+        RoomMessageEventContent::emote_html(body.clone(), trimmed_html)
+    } else {
+        RoomMessageEventContent::text_html(body.clone(), trimmed_html)
+    };
 
-    let mut ruma_content =
-        RoomMessageEventContent::text_html(args.body.clone(), trimmed_html.clone());
+    if let Some(mentions) = selvedge_shared::message::markdown::extract_mentions(&body) {
+        ruma_content.mentions = Some(mentions);
+    }
 
     if let Some(event_id) = &args.reply_to
         && let Ok(event) = room.event(event_id, None).await

@@ -3,7 +3,6 @@ use crate::actor::queue::{OutboundTask, QueueManager, TaskPayload};
 use js_sys::Date;
 use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
 use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, TransactionId};
-use pulldown_cmark::{Options, Parser, html};
 
 use selvedge_shared::event::ToShell;
 use selvedge_shared::event::core::CoreEvents;
@@ -35,18 +34,14 @@ pub async fn run(actor: &MatrixActor, args: EditMessageArgs) -> Vec<ToShell> {
         ))];
     }
 
-    let mut options = Options::empty();
-    options.insert(Options::ENABLE_STRIKETHROUGH);
-    options.insert(Options::ENABLE_TABLES);
+    let trimmed_html = selvedge_shared::message::markdown::parse_matrix_markdown(&args.new_body);
 
-    let parser = Parser::new_ext(&args.new_body, options);
-    let mut raw_html = String::new();
-    html::push_html(&mut raw_html, parser);
+    let mut ruma_content = RoomMessageEventContent::text_html(args.new_body.clone(), trimmed_html);
 
-    let safe_html = selvedge_shared::sanitize_matrix_html(&raw_html);
-    let trimmed_html = safe_html.trim().to_string();
+    if let Some(mentions) = selvedge_shared::message::markdown::extract_mentions(&args.new_body) {
+        ruma_content.mentions = Some(mentions);
+    }
 
-    let ruma_content = RoomMessageEventContent::text_html(args.new_body.clone(), trimmed_html);
     let local_echo_content = TimelineContent::from(ruma_content.clone());
 
     let txn_id = TransactionId::new();
