@@ -16,16 +16,16 @@ This document tracks the feature completion of the Core actor for the Selvedge M
 - [x] **Failed Message Retry:** Add a handler to re-attempt sending a local echo that was marked as `Failed`.
 - [x] **Failed Message Cancel:** Add a handler to discard a failed local echo, removing it from the timeline.
 
-- [ ] **Max Media Upload Check:** Fetch the homeserver's `m.upload.size` limit before initiating `send_media` to reject oversized files immediately.
-- [ ] **Media Metadata & Thumbnails:** Generate and attach thumbnails, blurhashes, width, and height to media uploads to prevent UI layout shifts.
-- [ ] **Media Captions:** Update `send_media` to accept and attach optional text captions to image, video, and file uploads.
-- [ ] **On-Demand Media Fetching:** Expose only thumbnails initially, deferring full-res media streams until explicitly requested by the UI.
+- [x] **Max Media Upload Check:** Fetch the homeserver's `m.upload.size` limit before initiating `send_media` to reject oversized files immediately.
+- [x] **Media Metadata & Thumbnails:** Generate and attach thumbnails, blurhashes, width, and height to media uploads to prevent UI layout shifts.
+- [x] **Media Captions:** Update `send_media` to accept and attach optional text captions to image, video, and file uploads.
+- [x] **On-Demand Media Fetching:** Expose only thumbnails initially, deferring full-res media streams until explicitly requested by the UI.
 
 - [x] **Reply HTML Fallbacks:** Append the standard HTML blockquote fallback to replied messages for backwards compatibility.
 - [x] **Nested Reply Stripping:** Strip existing `<mx-reply>` blocks when replying to an existing reply to prevent infinite quote nesting.
-- [ ] **Member Autocomplete Provider:** Add a Core helper to quickly filter and return room members matching a string prefix to fuel UI mention menus.
+- [x] **Member Autocomplete Provider:** Add a Core helper to quickly filter and return room members matching a string prefix to fuel UI mention menus.
 - [x] **Intentional Mentions (MSC3952):** Populate the `m.mentions` array in the event content when tagging users.
-- [ ] **Mention Pill Resolution:** Provide a Core helper to synchronously resolve Matrix IDs in HTML into `MemberProfile` data for pretty UI rendering.
+- [x] **Mention Pill Resolution:** Provide a Core helper to synchronously resolve Matrix IDs in HTML into `MemberProfile` data for pretty UI rendering.
 - [x] **Code Block Metadata:** Preserve `language-*` classes on `<pre><code>` blocks in the Markdown parser to allow syntax highlighting.
 - [x] **Spoiler Formatting:** Support parsing and sending spoilers using the Matrix `<span data-mx-spoiler>` standard.
 - [x] **Mathematical Formatting (MSC3193):** Render LaTeX/Math equations using the `data-mx-maths` HTML attribute within the Markdown compiler.
@@ -35,14 +35,14 @@ This document tracks the feature completion of the Core actor for the Selvedge M
 - [x] **Pending Edit & Redaction States:** Expose the pending `EventSendState` of offline edits and redactions so the UI can display loading indicators.
 - [x] **Emoji Reactions:** Add endpoints to send and remove `m.reaction` events.
 
-- [ ] **Send Read Receipts:** Create a handler to send `m.receipt` events to the server as the user reads new messages.
-- [ ] **Read Receipt Debouncing:** Implement a debounce queue in the Core to prevent rate-limiting when the user rapidly scrolls.
-- [ ] **Private Read Receipts (MSC2285):** Support sending `m.read.private` instead of `m.read` based on a user preference toggle to hide read status from others.
+- [x] **Send Read Receipts:** Create a handler to send `m.receipt` events to the server as the user reads new messages.
+- [x] **Read Receipt Debouncing:** Implement a debounce queue in the Core to prevent rate-limiting when the user rapidly scrolls. (delegated to the UI)
+- [x] **Private Read Receipts (MSC2285):** Support sending `m.read.private` instead of `m.read` based on a user preference toggle to hide read status from others.
 - [x] **Extract Read Receipts:** Map incoming `read_receipts` from the SDK timeline items so the UI can render "read by" avatars.
-- [ ] **Fully Read Markers:** Create a handler to send the `m.fully_read` account data event to sync the user's scroll position across devices.
-- [ ] **The "New Messages" Divider:** Map the `VirtualTimelineItem::ReadMarker` event to allow the UI to render a separator line for unread messages.
+- [x] **Fully Read Markers:** Create a handler to send the `m.fully_read` account data event to sync the user's scroll position across devices.
+- [x] **The "New Messages" Divider:** Map the `VirtualTimelineItem::ReadMarker` event to allow the UI to render a separator line for unread messages.
 
-- [ ] **Timeline Pagination Boundaries:** Expose flags for `start_of_room` and `live_edge` to control UI "Load More" spinners.
+- [x] **Timeline Pagination Boundaries:** Expose flags for `start_of_room` and `live_edge` to control UI "Load More" spinners.
 - [ ] **Event Permalink Generation:** Add a Core helper to construct `matrix.to` or `matrix://` URIs for sharing specific messages.
 - [ ] **Jump to Message:** Add a handler to dynamically load a focused timeline around a specific event ID when a user clicks a reply block.
 - [ ] **Composer Drafts:** Persist in-progress text input per room to IndexedDB so unsent messages survive page refreshes.
