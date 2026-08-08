@@ -12,6 +12,7 @@ pub use model::{
     RoomTrustLevel, StateContent, ThumbnailInfo, TimelineContent, TimelineDiff, TimelineItem,
     VerificationRequest, VerificationState, VideoInfo, VirtualItem,
 };
+use ruma::{EventId, RoomId};
 
 #[must_use]
 pub fn sanitize_matrix_html(raw_html: &str) -> String {
@@ -33,4 +34,11 @@ pub fn sanitize_matrix_html(raw_html: &str) -> String {
         .add_url_schemes(["http", "https", "ftp", "mailto", "magnet", "matrix", "mxc"])
         .clean(raw_html)
         .to_string()
+}
+
+/// Generates a standard matrix.to URI for a specific event in a room.
+/// This can be called synchronously from the Leptos UI when copying links.
+#[must_use]
+pub fn generate_event_permalink(room_id: &RoomId, event_id: &EventId) -> String {
+    room_id.matrix_to_event_uri(event_id).to_string()
 }
