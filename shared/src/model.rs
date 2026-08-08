@@ -232,6 +232,7 @@ pub struct EventItem {
     pub latest_edit: Option<Box<TimelineContent>>,
     pub thread_root_id: Option<OwnedEventId>,
 
+    pub is_own_mention: bool,
     pub is_highlight: bool,
     pub should_group: bool,
     pub encryption_status: EncryptionStatus,

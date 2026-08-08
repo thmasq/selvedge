@@ -1,13 +1,16 @@
 use indexmap::IndexMap;
-use matrix_sdk::Client;
-use matrix_sdk::ruma::OwnedEventId;
 use matrix_sdk::ruma::events::room::member::MembershipState;
+use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, OwnedEventId};
+use matrix_sdk::{Client, ruma::OwnedTransactionId};
 use matrix_sdk_ui::timeline::{
-    EmbeddedEvent, EventSendState, EventTimelineItem, MsgLikeContent, ReactionStatus,
-    TimelineDetails, TimelineEventShieldState, TimelineItemContent,
+    EmbeddedEvent, EventSendState, EventTimelineItem, Message, MsgLikeContent, MsgLikeKind,
+    ReactionStatus, TimelineDetails, TimelineEventShieldState, TimelineItemContent,
 };
 use ruma::presence::PresenceState;
-use selvedge_shared::{DeliveryStatus, EncryptionStatus, EventItem, ModelError, TimelineContent};
+use selvedge_shared::{
+    DeliveryStatus, EncryptionStatus, EventItem, MemberProfile, ModelError, TimelineContent,
+    model::{ReactionDetails, ReplyDetails},
+};
 use std::str::FromStr;
 
 use super::content::resolve_content;
@@ -18,7 +21,7 @@ pub fn compute_delivery_status(event: &EventTimelineItem) -> DeliveryStatus {
         .map_or(DeliveryStatus::Synced, |local_echo| match local_echo {
             EventSendState::NotSentYet { progress } => {
                 let txn_id = event.transaction_id().map_or_else(
-                    || matrix_sdk::ruma::OwnedTransactionId::from("unknown"),
+                    || OwnedTransactionId::from("unknown"),
                     std::borrow::ToOwned::to_owned,
                 );
 
@@ -53,7 +56,7 @@ pub fn resolve_event_id(event: &EventTimelineItem) -> matrix_sdk::ruma::OwnedEve
 pub async fn build_sender_profile(
     client: &Client,
     event: &EventTimelineItem,
-) -> Option<selvedge_shared::MemberProfile> {
+) -> Option<MemberProfile> {
     let TimelineDetails::Ready(profile) = event.sender_profile() else {
         return None;
     };
@@ -66,7 +69,7 @@ pub async fn build_sender_profile(
         .flatten()
         .is_some_and(|identity| identity.is_verified());
 
-    Some(selvedge_shared::MemberProfile {
+    Some(MemberProfile {
         user_id: event.sender().to_owned(),
         display_name: profile.display_name.clone(),
         avatar_url: profile.avatar_url.clone(),
@@ -79,7 +82,7 @@ pub async fn build_sender_profile(
 pub fn extract_reactions(
     client: &Client,
     msg_like: &MsgLikeContent,
-) -> IndexMap<String, selvedge_shared::model::ReactionDetails> {
+) -> IndexMap<String, ReactionDetails> {
     let mut reactions = IndexMap::new();
     let my_user_id = client.user_id();
 
@@ -98,7 +101,7 @@ pub fn extract_reactions(
 
         reactions.insert(
             emoji.clone(),
-            selvedge_shared::model::ReactionDetails {
+            ReactionDetails {
                 count,
                 me_reacted,
                 my_reaction_event_id,
@@ -108,13 +111,10 @@ pub fn extract_reactions(
     reactions
 }
 
-pub fn build_reply_details(
-    client: &Client,
-    replied_event: &EmbeddedEvent,
-) -> selvedge_shared::model::ReplyDetails {
+pub fn build_reply_details(client: &Client, replied_event: &EmbeddedEvent) -> ReplyDetails {
     let reply_content = Box::new(resolve_content(&replied_event.content, client.user_id()));
 
-    selvedge_shared::model::ReplyDetails {
+    ReplyDetails {
         sender: replied_event.sender.clone(),
         sender_display_name: match &replied_event.sender_profile {
             TimelineDetails::Ready(p) => p.display_name.clone(),
@@ -126,7 +126,7 @@ pub fn build_reply_details(
 
 pub struct ReplyInfo {
     pub in_reply_to: Option<OwnedEventId>,
-    pub reply_details: Option<selvedge_shared::model::ReplyDetails>,
+    pub reply_details: Option<ReplyDetails>,
     pub thread_root_id: Option<OwnedEventId>,
 }
 
@@ -199,16 +199,29 @@ pub async fn map_event_item(client: &Client, event: &EventTimelineItem) -> Event
     };
 
     let encryption_status = compute_encryption_status(event);
-    let is_edited = event
-        .content()
-        .as_message()
-        .is_some_and(matrix_sdk_ui::timeline::Message::is_edited);
+    let is_edited = event.content().as_message().is_some_and(Message::is_edited);
+
+    let is_own_mention = match event.content() {
+        TimelineItemContent::MsgLike(msg) => {
+            if let MsgLikeKind::Message(m) = &msg.kind {
+                if let Some(mentions) = m.mentions() {
+                    let my_user_id = client.user_id();
+                    my_user_id.is_some_and(|id| mentions.user_ids.contains(id)) || mentions.room
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        }
+        _ => false,
+    };
 
     EventItem {
         event_id,
         sender: event.sender().to_owned(),
         sender_profile,
-        timestamp: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch(event.timestamp().0),
+        timestamp: MilliSecondsSinceUnixEpoch(event.timestamp().0),
         content: Box::new(content),
         reactions,
         read_receipts: event.read_receipts().keys().cloned().collect(),
@@ -218,6 +231,7 @@ pub async fn map_event_item(client: &Client, event: &EventTimelineItem) -> Event
         is_edited,
         latest_edit: None,
         thread_root_id: reply_info.thread_root_id,
+        is_own_mention,
         is_highlight: event.is_highlighted(),
         should_group: false,
         encryption_status,

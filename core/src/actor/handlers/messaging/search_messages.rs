@@ -76,6 +76,7 @@ pub async fn run(actor: &MatrixActor, args: SearchMessagesArgs) -> Vec<ToShell> 
                             is_edited: false,
                             latest_edit: None,
                             thread_root_id: None,
+                            is_own_mention: false,
                             is_highlight: false,
                             should_group: false,
                             encryption_status: EncryptionStatus::Unencrypted,

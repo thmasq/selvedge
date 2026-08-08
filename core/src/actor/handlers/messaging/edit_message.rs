@@ -91,6 +91,7 @@ pub async fn run(actor: &MatrixActor, args: EditMessageArgs) -> Vec<ToShell> {
             is_edited: true,
             latest_edit: Some(Box::new(local_echo_content)),
             thread_root_id: None,
+            is_own_mention: false,
             is_highlight: false,
             should_group: false,
             encryption_status: EncryptionStatus::Unencrypted,
