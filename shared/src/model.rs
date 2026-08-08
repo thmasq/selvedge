@@ -242,6 +242,9 @@ pub struct EventItem {
 pub enum TimelineContent {
     Message(MessageContent),
     State(StateContent),
+    MembershipChange(String),
+    ProfileChange(String),
+    StateChange(String),
     Poll(PollState),
     Call(CallContent),
     Verification(VerificationRequest),

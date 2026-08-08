@@ -14,11 +14,12 @@ pub fn resolve_content(
         TimelineItemContent::MsgLike(msg) => msg_like::map(msg, own_user_id),
 
         TimelineItemContent::MembershipChange(m) => {
-            TimelineContent::State(state::map_membership(m))
+            TimelineContent::MembershipChange(state::map_membership(m))
         }
-        TimelineItemContent::ProfileChange(p) => TimelineContent::State(state::map_profile(p)),
-        TimelineItemContent::OtherState(s) => TimelineContent::State(state::map_other(s)),
-
+        TimelineItemContent::ProfileChange(p) => {
+            TimelineContent::ProfileChange(state::map_profile(p))
+        }
+        TimelineItemContent::OtherState(s) => TimelineContent::StateChange(state::map_other(s)),
         TimelineItemContent::CallInvite => voip::map_invite(),
         TimelineItemContent::RtcNotification {
             call_intent,
