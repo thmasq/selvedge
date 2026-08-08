@@ -1,7 +1,9 @@
 use crate::actor::MatrixActor;
 use crate::actor::mapping::{map_timeline_diff, map_timeline_item_safe};
 use futures::StreamExt;
-use matrix_sdk_ui::timeline::{RoomExt, TimelineReadReceiptTracking};
+use matrix_sdk_ui::timeline::{
+    RoomExt, TimelineEventFocusThreadMode, TimelineFocus, TimelineReadReceiptTracking,
+};
 use selvedge_shared::event::ToShell;
 use selvedge_shared::event::room::RoomEvents;
 use selvedge_shared::event::room::room_details_update::RoomDetailsUpdateArgs;
@@ -18,127 +20,140 @@ pub async fn run(actor: &MatrixActor, args: OpenRoomArgs) -> Vec<ToShell> {
     {
         let has_timeline = actor.active_timelines.borrow().contains_key(&args.room_id);
 
-        if !has_timeline
-            && let Ok(timeline) = room
+        let needs_new_timeline = !has_timeline || args.focus_event_id.is_some();
+
+        if needs_new_timeline {
+            let mut builder = room
                 .timeline_builder()
-                .track_read_marker_and_receipts(TimelineReadReceiptTracking::AllEvents)
-                .build()
-                .await
-        {
-            let is_encrypted = room.encryption_state().is_encrypted();
+                .track_read_marker_and_receipts(TimelineReadReceiptTracking::AllEvents);
 
-            let trust_level = if is_encrypted {
-                RoomTrustLevel::Trusted
-            } else {
-                RoomTrustLevel::Plain
-            };
-
-            actor.send_event(ToShell::Room(RoomEvents::RoomDetailsUpdate(
-                RoomDetailsUpdateArgs {
-                    room_id: args.room_id.clone(),
-                    details: RoomDetails {
-                        room_id: args.room_id.clone(),
-                        name: room.name(),
-                        topic: room.topic(),
-                        avatar_url: room.avatar_url(),
-                        members: HashMap::new(),
-                        timeline: VecDeque::new(),
-                        typing_users: HashSet::new(),
-                        active_call: None,
-                        is_encrypted,
-                        trust_level,
-                        permissions: RoomPermissions::default(),
-                        prev_batch: None,
-                        next_batch: None,
-                        fully_read_marker: None,
+            if let Some(focus_event_id) = &args.focus_event_id {
+                builder = builder.with_focus(TimelineFocus::Event {
+                    target: focus_event_id.clone(),
+                    num_context_events: 50,
+                    thread_mode: TimelineEventFocusThreadMode::Automatic {
+                        hide_threaded_events: false,
                     },
-                },
-            )));
-
-            let (items, mut stream) = timeline.subscribe().await;
-
-            let mut initial_views = Vec::new();
-            for i in items {
-                let mapped = map_timeline_item_safe(&client, &i).await;
-                actor
-                    .search_engine
-                    .lock()
-                    .await
-                    .inner
-                    .index_item(&args.room_id, &mapped);
-                initial_views.push(mapped);
+                });
             }
 
-            actor.send_event(ToShell::Room(RoomEvents::TimelineDiff(TimelineDiffArgs {
-                room_id: args.room_id.clone(),
-                diff: vec![TimelineDiff::Reset {
-                    entries: initial_views,
-                }],
-            })));
+            if let Ok(timeline) = builder.build().await {
+                let is_encrypted = room.encryption_state().is_encrypted();
 
-            actor
-                .active_timelines
-                .borrow_mut()
-                .insert(args.room_id.clone(), std::rc::Rc::new(timeline));
+                let trust_level = if is_encrypted {
+                    RoomTrustLevel::Trusted
+                } else {
+                    RoomTrustLevel::Plain
+                };
 
-            let sender = actor.event_sender.clone();
-            let stream_room_id = args.room_id.clone();
-            let search_engine = actor.search_engine.clone();
-            let mapper_client = client.clone();
+                actor.send_event(ToShell::Room(RoomEvents::RoomDetailsUpdate(
+                    RoomDetailsUpdateArgs {
+                        room_id: args.room_id.clone(),
+                        details: RoomDetails {
+                            room_id: args.room_id.clone(),
+                            name: room.name(),
+                            topic: room.topic(),
+                            avatar_url: room.avatar_url(),
+                            members: HashMap::new(),
+                            timeline: VecDeque::new(),
+                            typing_users: HashSet::new(),
+                            active_call: None,
+                            is_encrypted,
+                            trust_level,
+                            permissions: RoomPermissions::default(),
+                            prev_batch: None,
+                            next_batch: None,
+                            fully_read_marker: None,
+                        },
+                    },
+                )));
 
-            spawn_local(async move {
-                while let Some(diffs) = stream.next().await {
-                    let mut mapped_diffs = Vec::new();
-                    for diff in diffs {
-                        let mapped_diff = map_timeline_diff(&mapper_client, diff).await;
+                let (items, mut stream) = timeline.subscribe().await;
 
-                        match &mapped_diff {
-                            TimelineDiff::Append { entries } | TimelineDiff::Reset { entries } => {
-                                let search_engine = search_engine.clone();
-                                let stream_room_id = stream_room_id.clone();
-                                let entries = entries.clone();
+                let mut initial_views = Vec::new();
+                for i in items {
+                    let mapped = map_timeline_item_safe(&client, &i).await;
+                    actor
+                        .search_engine
+                        .lock()
+                        .await
+                        .inner
+                        .index_item(&args.room_id, &mapped);
+                    initial_views.push(mapped);
+                }
 
-                                spawn_local(async move {
-                                    for entry in &entries {
+                actor.send_event(ToShell::Room(RoomEvents::TimelineDiff(TimelineDiffArgs {
+                    room_id: args.room_id.clone(),
+                    diff: vec![TimelineDiff::Reset {
+                        entries: initial_views,
+                    }],
+                })));
+
+                actor
+                    .active_timelines
+                    .borrow_mut()
+                    .insert(args.room_id.clone(), std::rc::Rc::new(timeline));
+
+                let sender = actor.event_sender.clone();
+                let stream_room_id = args.room_id.clone();
+                let search_engine = actor.search_engine.clone();
+                let mapper_client = client.clone();
+
+                spawn_local(async move {
+                    while let Some(diffs) = stream.next().await {
+                        let mut mapped_diffs = Vec::new();
+                        for diff in diffs {
+                            let mapped_diff = map_timeline_diff(&mapper_client, diff).await;
+
+                            match &mapped_diff {
+                                TimelineDiff::Append { entries }
+                                | TimelineDiff::Reset { entries } => {
+                                    let search_engine = search_engine.clone();
+                                    let stream_room_id = stream_room_id.clone();
+                                    let entries = entries.clone();
+
+                                    spawn_local(async move {
+                                        for entry in &entries {
+                                            search_engine
+                                                .lock()
+                                                .await
+                                                .upsert_live_event(&stream_room_id, entry)
+                                                .await;
+                                        }
+                                    });
+                                }
+                                TimelineDiff::PushFront { entry }
+                                | TimelineDiff::PushBack { entry }
+                                | TimelineDiff::Insert { entry, .. }
+                                | TimelineDiff::Set { entry, .. } => {
+                                    let search_engine = search_engine.clone();
+                                    let stream_room_id = stream_room_id.clone();
+                                    let entry = entry.clone();
+
+                                    spawn_local(async move {
                                         search_engine
                                             .lock()
                                             .await
-                                            .upsert_live_event(&stream_room_id, entry)
+                                            .upsert_live_event(&stream_room_id, &entry)
                                             .await;
-                                    }
-                                });
+                                    });
+                                }
+                                #[allow(clippy::match_same_arms)]
+                                TimelineDiff::Remove { index: _ } => {}
+                                _ => {}
                             }
-                            TimelineDiff::PushFront { entry }
-                            | TimelineDiff::PushBack { entry }
-                            | TimelineDiff::Insert { entry, .. }
-                            | TimelineDiff::Set { entry, .. } => {
-                                let search_engine = search_engine.clone();
-                                let stream_room_id = stream_room_id.clone();
-                                let entry = entry.clone();
 
-                                spawn_local(async move {
-                                    search_engine
-                                        .lock()
-                                        .await
-                                        .upsert_live_event(&stream_room_id, &entry)
-                                        .await;
-                                });
-                            }
-                            #[allow(clippy::match_same_arms)]
-                            TimelineDiff::Remove { index: _ } => {}
-                            _ => {}
+                            mapped_diffs.push(mapped_diff);
                         }
-
-                        mapped_diffs.push(mapped_diff);
+                        let _ = sender.unbounded_send(ToShell::Room(RoomEvents::TimelineDiff(
+                            TimelineDiffArgs {
+                                room_id: stream_room_id.clone(),
+                                diff: mapped_diffs,
+                            },
+                        )));
                     }
-                    let _ = sender.unbounded_send(ToShell::Room(RoomEvents::TimelineDiff(
-                        TimelineDiffArgs {
-                            room_id: stream_room_id.clone(),
-                            diff: mapped_diffs,
-                        },
-                    )));
-                }
-            });
+                });
+            }
         }
     }
     vec![]

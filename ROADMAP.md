@@ -43,9 +43,9 @@ This document tracks the feature completion of the Core actor for the Selvedge M
 - [x] **The "New Messages" Divider:** Map the `VirtualTimelineItem::ReadMarker` event to allow the UI to render a separator line for unread messages.
 
 - [x] **Timeline Pagination Boundaries:** Expose flags for `start_of_room` and `live_edge` to control UI "Load More" spinners.
-- [ ] **Event Permalink Generation:** Add a Core helper to construct `matrix.to` or `matrix://` URIs for sharing specific messages.
-- [ ] **Jump to Message:** Add a handler to dynamically load a focused timeline around a specific event ID when a user clicks a reply block.
-- [ ] **Composer Drafts:** Persist in-progress text input per room to IndexedDB so unsent messages survive page refreshes.
+- [x] **Event Permalink Generation:** Add a Core helper to construct `matrix.to` or `matrix://` URIs for sharing specific messages.
+- [x] **Jump to Message:** Add a handler to dynamically load a focused timeline around a specific event ID when a user clicks a reply block.
+- [x] **Composer Drafts:** Persist in-progress text input per room to IndexedDB so unsent messages survive page refreshes. (delegated to the UI)
 - [x] **Offline Queuing:** Implement a local queue to hold messages sent while disconnected, automatically flushing when reconnected.
 - [ ] **Push Rule Evaluation:** Wire up the SDK's push rule evaluator to dynamically flip an `is_highlight` boolean on incoming messages.
 - [ ] **Decryption Error States (UTD):** Map specific `EncryptionStatus` error types to display actionable UI placeholders.
