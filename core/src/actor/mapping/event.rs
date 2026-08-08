@@ -1,3 +1,5 @@
+use super::content::resolve_content;
+
 use indexmap::IndexMap;
 use matrix_sdk::ruma::events::room::member::MembershipState;
 use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, OwnedEventId};
@@ -12,8 +14,6 @@ use selvedge_shared::{
     model::{ReactionDetails, ReplyDetails},
 };
 use std::str::FromStr;
-
-use super::content::resolve_content;
 
 pub fn compute_delivery_status(event: &EventTimelineItem) -> DeliveryStatus {
     event
@@ -199,6 +199,11 @@ pub async fn map_event_item(client: &Client, event: &EventTimelineItem) -> Event
     };
 
     let encryption_status = compute_encryption_status(event);
+    let is_trusted = matches!(
+        encryption_status,
+        EncryptionStatus::Verified | EncryptionStatus::Unencrypted
+    );
+
     let is_edited = event.content().as_message().is_some_and(Message::is_edited);
 
     let is_own_mention = match event.content() {
@@ -233,6 +238,7 @@ pub async fn map_event_item(client: &Client, event: &EventTimelineItem) -> Event
         thread_root_id: reply_info.thread_root_id,
         is_own_mention,
         is_highlight: event.is_highlighted(),
+        is_trusted,
         should_group: false,
         encryption_status,
     }

@@ -93,6 +93,7 @@ pub async fn run(actor: &MatrixActor, args: EditMessageArgs) -> Vec<ToShell> {
             thread_root_id: None,
             is_own_mention: false,
             is_highlight: false,
+            is_trusted: true,
             should_group: false,
             encryption_status: EncryptionStatus::Unencrypted,
         })),

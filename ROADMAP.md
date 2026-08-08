@@ -10,7 +10,7 @@ This document tracks the feature completion of the Core actor for the Selvedge M
 - [x] **Emotes (`m.emote`):** Intercept `/me` commands in the Core to send the `m.emote` message type instead of standard text.
 - [x] **Unknown Message Fallbacks:** Render the standard `body` string for unrecognized custom `msgtype` or event types.
 - [x] **Notice Handling (`m.notice`):** Map `m.notice` events explicitly so the UI can render bot/bridge messages appropriately.
-- [ ] **State Event Formatting:** Map timeline state events (joins, parts, bans) into structured, UI-ready formats like `StateEvent::MemberJoin("Alice")`.
+- [x] **State Event Formatting:** Map timeline state events (joins, parts, bans) into structured, UI-ready formats like `StateEvent::MemberJoin("Alice")`.
 - [x] **Virtual Timeline Items:** Map `VirtualTimelineItem::DayDivider` events from the SDK to the UI to display date separators.
 - [x] **Local Echo Send States:** Map `EventSendState` (Sending, Sent, Failed) to the UI to display loading spinners or error indicators.
 - [x] **Failed Message Retry:** Add a handler to re-attempt sending a local echo that was marked as `Failed`.
@@ -47,9 +47,9 @@ This document tracks the feature completion of the Core actor for the Selvedge M
 - [x] **Jump to Message:** Add a handler to dynamically load a focused timeline around a specific event ID when a user clicks a reply block.
 - [x] **Composer Drafts:** Persist in-progress text input per room to IndexedDB so unsent messages survive page refreshes. (delegated to the UI)
 - [x] **Offline Queuing:** Implement a local queue to hold messages sent while disconnected, automatically flushing when reconnected.
-- [ ] **Push Rule Evaluation:** Wire up the SDK's push rule evaluator to dynamically flip an `is_highlight` boolean on incoming messages.
-- [ ] **Decryption Error States (UTD):** Map specific `EncryptionStatus` error types to display actionable UI placeholders.
-- [ ] **Per-Message Trust Shields:** Expose a warning flag on timeline items if a previously verified user sends a message from an unverified session.
+- [x] **Push Rule Evaluation:** Wire up the SDK's push rule evaluator to dynamically flip an `is_highlight` boolean on incoming messages.
+- [x] **Decryption Error States (UTD):** Map specific `EncryptionStatus` error types to display actionable UI placeholders.
+- [x] **Per-Message Trust Shields:** Expose a warning flag on timeline items if a previously verified user sends a message from an unverified session.
 
 ---
 

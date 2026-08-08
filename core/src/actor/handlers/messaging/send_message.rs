@@ -108,6 +108,7 @@ pub async fn run(actor: &MatrixActor, args: SendMessageArgs) -> Vec<ToShell> {
         thread_root_id: None,
         is_own_mention: false,
         is_highlight: false,
+        is_trusted: true,
         should_group: false,
         encryption_status: selvedge_shared::model::EncryptionStatus::Unencrypted,
     };

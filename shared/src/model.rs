@@ -235,6 +235,7 @@ pub struct EventItem {
     pub is_own_mention: bool,
     pub is_highlight: bool,
     pub should_group: bool,
+    pub is_trusted: bool,
     pub encryption_status: EncryptionStatus,
 }
 
