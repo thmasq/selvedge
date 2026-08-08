@@ -64,18 +64,16 @@ pub fn map(msg: &MsgLikeContent, own_user_id: Option<&UserId>) -> TimelineConten
             })
         }
         MsgLikeKind::UnableToDecrypt(utd) => match utd {
-            EncryptedMessage::OlmV1Curve25519AesSha2 { sender_key } => {
-                TimelineContent::Undecryptable {
-                    session_id: String::new(),
-                    sender_key: sender_key.clone(),
-                }
-            }
-            EncryptedMessage::MegolmV1AesSha2 { session_id, .. } => {
-                TimelineContent::Undecryptable {
-                    session_id: session_id.clone(),
-                    sender_key: String::new(),
-                }
-            }
+            EncryptedMessage::OlmV1Curve25519AesSha2 { sender_key } => TimelineContent::Utd {
+                session_id: String::new(),
+                sender_key: sender_key.clone(),
+                placeholder: "Waiting for this message, this may take a while...".to_string(),
+            },
+            EncryptedMessage::MegolmV1AesSha2 { session_id, .. } => TimelineContent::Utd {
+                session_id: session_id.clone(),
+                sender_key: String::new(),
+                placeholder: "Waiting for this message, this may take a while...".to_string(),
+            },
             EncryptedMessage::Unknown => TimelineContent::Unsupported,
         },
         MsgLikeKind::LiveLocation(l) => TimelineContent::LiveLocation {

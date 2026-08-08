@@ -254,9 +254,10 @@ pub enum TimelineContent {
     },
     Unsupported,
     Redacted,
-    Undecryptable {
+    Utd {
         session_id: String,
         sender_key: String,
+        placeholder: String,
     },
     LiveLocation {
         is_active: bool,
